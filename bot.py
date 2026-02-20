@@ -44,6 +44,7 @@ load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN", "")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))
+FORUM_CHANNEL_ID = int(os.getenv("FORUM_CHANNEL_ID", "0"))
 PREFIX = os.getenv("COMMAND_PREFIX", "!")
 
 if not TOKEN:
@@ -74,11 +75,15 @@ async def on_ready() -> None:
     global tracker
     log.info("Logged in as %s (id=%s)", bot.user, bot.user.id)
 
-    if CHANNEL_ID:
-        tracker = MatchTracker(bot, CHANNEL_ID)
+    if CHANNEL_ID or FORUM_CHANNEL_ID:
+        tracker = MatchTracker(
+            bot,
+            channel_id=CHANNEL_ID,
+            forum_channel_id=FORUM_CHANNEL_ID or None,
+        )
         tracker.start()
     else:
-        log.warning("No CHANNEL_ID set; skipping live match tracker.")
+        log.warning("No CHANNEL_ID or FORUM_CHANNEL_ID set; skipping live match tracker.")
 
 
 @bot.event

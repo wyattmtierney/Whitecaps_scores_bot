@@ -2,7 +2,8 @@
 Match tracker: polls ESPN API for live Whitecaps matches and detects new events.
 
 Runs as a background asyncio task. When a live match is detected:
-  - Sends/updates a live embed in the configured channel
+  - Creates a forum thread in the configured forum channel (if set)
+  - Sends/updates a live embed in the thread (or fallback channel)
   - Posts goal alerts as separate messages
   - Marks the match as complete when it ends
 """
@@ -28,25 +29,50 @@ def _is_goal(event: dict) -> bool:
     return any(g in event.get("type", "").lower() for g in GOAL_EVENT_TYPES)
 
 
+def _format_thread_title(match: dict) -> str:
+    """Build a forum thread title like 'Away @ Home - Feb. 18, 2026'."""
+    away_name = match["away"]["name"]
+    home_name = match["home"]["name"]
+
+    try:
+        dt = datetime.fromisoformat(match["date"].replace("Z", "+00:00"))
+        date_str = dt.strftime("%b. %d, %Y").replace(" 0", " ")
+    except (ValueError, KeyError):
+        date_str = "TBD"
+
+    return f"{away_name} @ {home_name} - {date_str}"
+
+
 class MatchTracker:
     """
     Tracks live Whitecaps matches and posts updates to a Discord channel.
 
+    When ``forum_channel_id`` is provided the tracker creates a new forum
+    thread for each match and posts all updates inside it.  If not set, it
+    falls back to posting directly in the regular ``channel_id``.
+
     Usage:
-        tracker = MatchTracker(bot, channel_id=123456)
+        tracker = MatchTracker(bot, channel_id=123, forum_channel_id=456)
         tracker.start()   # call after bot is ready
         tracker.stop()    # call on shutdown
     """
 
-    def __init__(self, bot: discord.Client, channel_id: int):
+    def __init__(
+        self,
+        bot: discord.Client,
+        channel_id: int = 0,
+        forum_channel_id: int | None = None,
+    ):
         self.bot = bot
         self.channel_id = channel_id
+        self.forum_channel_id = forum_channel_id
 
         # Per-match state
         self._live_message: discord.Message | None = None
         self._current_match_id: str | None = None
         self._seen_events: set[str] = set()
         self._match_over: bool = False
+        self._thread: discord.Thread | None = None
 
         self._task: asyncio.Task | None = None
 
@@ -68,21 +94,65 @@ class MatchTracker:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _channel(self) -> discord.TextChannel | None:
-        return self.bot.get_channel(self.channel_id)
+    def _fallback_channel(self) -> discord.TextChannel | None:
+        if self.channel_id:
+            return self.bot.get_channel(self.channel_id)
+        return None
+
+    def _target_channel(self) -> discord.Thread | discord.TextChannel | None:
+        """Return the forum thread if one exists, otherwise the fallback channel."""
+        if self._thread is not None:
+            return self._thread
+        return self._fallback_channel()
 
     def _reset_state(self) -> None:
         self._live_message = None
         self._current_match_id = None
         self._seen_events = set()
         self._match_over = False
+        self._thread = None
 
     def _event_key(self, event: dict) -> str:
         return f"{event.get('type')}:{event.get('clock')}:{event.get('team_abbr')}:{event.get('participants', [{}])[0].get('name', '')}"
 
+    async def _create_forum_thread(self, match: dict) -> discord.Thread | None:
+        """Create a new thread in the forum channel for this match."""
+        if not self.forum_channel_id:
+            return None
+
+        forum = self.bot.get_channel(self.forum_channel_id)
+        if not isinstance(forum, discord.ForumChannel):
+            log.warning(
+                "FORUM_CHANNEL_ID %s is not a ForumChannel (got %s); "
+                "falling back to regular channel.",
+                self.forum_channel_id,
+                type(forum).__name__ if forum else "None",
+            )
+            return None
+
+        title = _format_thread_title(match)
+        embed = build_match_embed(match)
+
+        try:
+            result = await forum.create_thread(
+                name=title,
+                content=(
+                    "Match day! \U0001f1e8\U0001f1e6 "
+                    "Let's get it started \u2014 drop your predictions below!"
+                ),
+                embed=embed,
+            )
+            # discord.py returns a ThreadWithMessage namedtuple
+            thread = result.thread if hasattr(result, "thread") else result
+            log.info("Created forum thread '%s' (id=%s)", title, thread.id)
+            return thread
+        except discord.HTTPException as e:
+            log.warning("Failed to create forum thread: %s", e)
+            return None
+
     async def _post_or_update_live(self, match: dict, summary: dict | None) -> None:
         """Post a new live embed or edit the existing one."""
-        channel = self._channel()
+        channel = self._target_channel()
         if channel is None:
             return
 
@@ -104,7 +174,7 @@ class MatchTracker:
 
     async def _handle_new_events(self, match: dict, key_events: list[dict]) -> None:
         """Detect and announce new goals/events since last poll."""
-        channel = self._channel()
+        channel = self._target_channel()
         if channel is None:
             return
 
@@ -124,7 +194,7 @@ class MatchTracker:
 
     async def _post_final(self, match: dict, summary: dict | None) -> None:
         """Edit the live message to a final/post-match embed."""
-        channel = self._channel()
+        channel = self._target_channel()
         if channel is None:
             return
 
@@ -188,19 +258,28 @@ class MatchTracker:
             self._current_match_id = match_id
             log.info("Tracking match %s (state=%s)", match_id, state)
 
+            # Try to create a forum thread for this match
+            self._thread = await self._create_forum_thread(match)
+
             if state == "pre":
-                # Announce upcoming match
-                channel = self._channel()
-                if channel:
-                    embed = build_match_embed(match)
-                    try:
-                        await channel.send(embed=embed)
-                    except discord.HTTPException as e:
-                        log.warning("Failed to send pre-match embed: %s", e)
+                # If we didn't create a forum thread, post in fallback channel
+                if self._thread is None:
+                    channel = self._fallback_channel()
+                    if channel:
+                        embed = build_match_embed(match)
+                        try:
+                            await channel.send(embed=embed)
+                        except discord.HTTPException as e:
+                            log.warning("Failed to send pre-match embed: %s", e)
                 return POLL_INTERVAL_IDLE
 
         # ---- Live match ----
         if state == "in":
+            # If we haven't created a thread yet (e.g. bot started mid-match),
+            # try now so live updates go into the thread.
+            if self._thread is None and self.forum_channel_id:
+                self._thread = await self._create_forum_thread(match)
+
             summary = await espn_api.get_match_summary(session, match_id)
             key_events = summary.get("key_events", []) if summary else []
 
