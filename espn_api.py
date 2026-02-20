@@ -1,0 +1,239 @@
+"""ESPN API client for fetching Vancouver Whitecaps MLS match data."""
+
+import aiohttp
+from datetime import datetime, timezone
+
+BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/usa.1"
+WHITECAPS_ID = "9727"
+WHITECAPS_NAMES = {"Vancouver Whitecaps FC", "Vancouver Whitecaps", "Whitecaps"}
+
+
+async def _fetch(session: aiohttp.ClientSession, url: str) -> dict | None:
+    try:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status == 200:
+                return await resp.json()
+    except (aiohttp.ClientError, TimeoutError):
+        pass
+    return None
+
+
+def _is_whitecaps(competitor: dict) -> bool:
+    name = competitor.get("team", {}).get("displayName", "")
+    team_id = competitor.get("team", {}).get("id", "")
+    return name in WHITECAPS_NAMES or str(team_id) == WHITECAPS_ID
+
+
+def _parse_competitor(comp: dict) -> dict:
+    team = comp.get("team", {})
+    return {
+        "id": team.get("id"),
+        "name": team.get("displayName", "Unknown"),
+        "abbreviation": team.get("abbreviation", "???"),
+        "logo": team.get("logo", ""),
+        "score": comp.get("score", "0"),
+        "home_away": comp.get("homeAway", ""),
+        "winner": comp.get("winner", False),
+    }
+
+
+def _parse_match(event: dict) -> dict | None:
+    """Parse an ESPN event into a simplified match dict."""
+    competitions = event.get("competitions", [])
+    if not competitions:
+        return None
+    comp = competitions[0]
+
+    competitors = comp.get("competitors", [])
+    if len(competitors) < 2:
+        return None
+
+    home = away = None
+    for c in competitors:
+        if c.get("homeAway") == "home":
+            home = _parse_competitor(c)
+        else:
+            away = _parse_competitor(c)
+
+    if not home or not away:
+        return None
+
+    status = comp.get("status", {})
+    status_type = status.get("type", {})
+
+    return {
+        "id": event.get("id"),
+        "name": event.get("name", ""),
+        "date": event.get("date", ""),
+        "venue": comp.get("venue", {}).get("fullName", ""),
+        "home": home,
+        "away": away,
+        "status": {
+            "state": status_type.get("state", "pre"),  # pre, in, post
+            "detail": status_type.get("detail", ""),
+            "description": status_type.get("description", ""),
+            "clock": status.get("displayClock", "0'"),
+            "period": status.get("period", 0),
+        },
+        "is_whitecaps_home": _is_whitecaps(competitors[0])
+        if competitors[0].get("homeAway") == "home"
+        else _is_whitecaps(competitors[1]),
+    }
+
+
+async def get_scoreboard(session: aiohttp.ClientSession) -> list[dict]:
+    """Get today's MLS scoreboard and find Whitecaps matches."""
+    data = await _fetch(session, f"{BASE_URL}/scoreboard")
+    if not data:
+        return []
+
+    matches = []
+    for event in data.get("events", []):
+        for comp in event.get("competitions", []):
+            for c in comp.get("competitors", []):
+                if _is_whitecaps(c):
+                    parsed = _parse_match(event)
+                    if parsed:
+                        matches.append(parsed)
+                    break
+    return matches
+
+
+async def get_match_summary(session: aiohttp.ClientSession, event_id: str) -> dict | None:
+    """Get detailed match summary including events (goals, subs, cards)."""
+    data = await _fetch(session, f"{BASE_URL}/summary?event={event_id}")
+    if not data:
+        return None
+
+    key_events = []
+
+    # Parse roster/lineup info
+    rosters = {}
+    for roster in data.get("rosters", []):
+        team_name = roster.get("team", {}).get("displayName", "")
+        team_abbr = roster.get("team", {}).get("abbreviation", "")
+        for entry in roster.get("roster", []):
+            player = entry.get("athlete", {})
+            pid = player.get("id", "")
+            rosters[pid] = {
+                "name": player.get("displayName", "Unknown"),
+                "team": team_name,
+                "team_abbr": team_abbr,
+                "jersey": entry.get("jersey", ""),
+                "position": entry.get("position", {}).get("abbreviation", ""),
+            }
+
+    # Parse key events from the summary
+    for item in data.get("keyEvents", []):
+        play = item.get("play", item)
+        event_type = play.get("type", {}).get("text", "")
+        clock = play.get("clock", {}).get("displayValue", "")
+        period = play.get("period", {}).get("number", 0)
+        text = play.get("text", "")
+
+        participants = []
+        for p in play.get("participants", []):
+            athlete = p.get("athlete", {})
+            participants.append({
+                "name": athlete.get("displayName", "Unknown"),
+                "id": athlete.get("id", ""),
+                "type": p.get("type", {}).get("text", ""),
+            })
+
+        team = play.get("team", {})
+
+        key_events.append({
+            "type": event_type,
+            "clock": clock,
+            "period": period,
+            "text": text,
+            "team": team.get("displayName", ""),
+            "team_abbr": team.get("abbreviation", ""),
+            "participants": participants,
+        })
+
+    # Parse commentary / game details
+    details = []
+    for item in data.get("commentary", []):
+        details.append({
+            "time": item.get("time", {}).get("displayValue", ""),
+            "text": item.get("text", ""),
+        })
+
+    # Get formation info
+    formations = {}
+    for roster in data.get("rosters", []):
+        team_name = roster.get("team", {}).get("displayName", "")
+        formation = roster.get("formation", "")
+        if formation:
+            formations[team_name] = formation
+
+    return {
+        "key_events": key_events,
+        "rosters": rosters,
+        "commentary": details,
+        "formations": formations,
+    }
+
+
+async def get_schedule(session: aiohttp.ClientSession) -> list[dict]:
+    """Get the Whitecaps upcoming/recent schedule."""
+    data = await _fetch(
+        session,
+        f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule",
+    )
+    if not data:
+        return []
+
+    matches = []
+    for event in data.get("events", []):
+        parsed = _parse_match(event)
+        if parsed:
+            matches.append(parsed)
+    return matches
+
+
+async def get_standings(session: aiohttp.ClientSession) -> dict | None:
+    """Get MLS standings."""
+    data = await _fetch(session, f"{BASE_URL}/standings")
+    if not data:
+        return None
+
+    standings = {}
+    for group in data.get("children", []):
+        conf_name = group.get("name", "Conference")
+        entries = []
+        for entry in group.get("standings", {}).get("entries", []):
+            team = entry.get("team", {})
+            stats = {}
+            for s in entry.get("stats", []):
+                stats[s.get("name", "")] = s.get("displayValue", s.get("value", ""))
+            entries.append({
+                "name": team.get("displayName", ""),
+                "abbreviation": team.get("abbreviation", ""),
+                "logo": team.get("logos", [{}])[0].get("href", "") if team.get("logos") else "",
+                "stats": stats,
+                "is_whitecaps": team.get("id") == WHITECAPS_ID
+                or team.get("displayName") in WHITECAPS_NAMES,
+            })
+        standings[conf_name] = entries
+
+    return standings
+
+
+async def get_next_match(session: aiohttp.ClientSession) -> dict | None:
+    """Get the next upcoming Whitecaps match."""
+    schedule = await get_schedule(session)
+    now = datetime.now(timezone.utc)
+    upcoming = []
+    for m in schedule:
+        try:
+            match_date = datetime.fromisoformat(m["date"].replace("Z", "+00:00"))
+            if match_date > now or m["status"]["state"] in ("in", "pre"):
+                upcoming.append(m)
+        except (ValueError, KeyError):
+            continue
+
+    if upcoming:
+        return upcoming[0]
+    return None
