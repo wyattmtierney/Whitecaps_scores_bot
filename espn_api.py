@@ -1,7 +1,10 @@
 """ESPN API client for fetching Vancouver Whitecaps MLS match data."""
 
+import logging
 import aiohttp
 from datetime import datetime, timezone
+
+log = logging.getLogger(__name__)
 
 BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/usa.1"
 WHITECAPS_ID = "9727"
@@ -12,9 +15,15 @@ async def _fetch(session: aiohttp.ClientSession, url: str) -> dict | None:
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
             if resp.status == 200:
-                return await resp.json()
-    except (aiohttp.ClientError, TimeoutError):
-        pass
+                # content_type=None accepts any content-type header ESPN sends
+                data = await resp.json(content_type=None)
+                log.debug("GET %s -> 200, keys=%s", url, list(data.keys()) if isinstance(data, dict) else type(data))
+                return data
+            log.warning("GET %s -> HTTP %s", url, resp.status)
+    except aiohttp.ClientError as e:
+        log.warning("Network error fetching %s: %s", url, e)
+    except Exception as e:
+        log.warning("Unexpected error fetching %s: %s", url, e)
     return None
 
 
@@ -26,11 +35,13 @@ def _is_whitecaps(competitor: dict) -> bool:
 
 def _parse_competitor(comp: dict) -> dict:
     team = comp.get("team", {})
+    # ESPN returns either a single "logo" string or a "logos" array
+    logo = team.get("logo") or (team.get("logos") or [{}])[0].get("href", "")
     return {
         "id": team.get("id"),
         "name": team.get("displayName", "Unknown"),
         "abbreviation": team.get("abbreviation", "???"),
-        "logo": team.get("logo", ""),
+        "logo": logo,
         "score": comp.get("score", "0"),
         "home_away": comp.get("homeAway", ""),
         "winner": comp.get("winner", False),
@@ -41,11 +52,13 @@ def _parse_match(event: dict) -> dict | None:
     """Parse an ESPN event into a simplified match dict."""
     competitions = event.get("competitions", [])
     if not competitions:
+        log.debug("Event %s has no competitions", event.get("id"))
         return None
     comp = competitions[0]
 
     competitors = comp.get("competitors", [])
     if len(competitors) < 2:
+        log.debug("Event %s has fewer than 2 competitors", event.get("id"))
         return None
 
     home = away = None
@@ -56,6 +69,7 @@ def _parse_match(event: dict) -> dict | None:
             away = _parse_competitor(c)
 
     if not home or not away:
+        log.debug("Event %s missing home or away competitor", event.get("id"))
         return None
 
     status = comp.get("status", {})
@@ -177,19 +191,25 @@ async def get_match_summary(session: aiohttp.ClientSession, event_id: str) -> di
 
 
 async def get_schedule(session: aiohttp.ClientSession) -> list[dict]:
-    """Get the Whitecaps upcoming/recent schedule."""
+    """Get the Whitecaps schedule (current season, all match states)."""
+    year = datetime.now(timezone.utc).year
     data = await _fetch(
         session,
-        f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule",
+        f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year}",
     )
     if not data:
         return []
 
+    events = data.get("events", [])
+    log.debug("Schedule response top-level keys: %s; event count: %d", list(data.keys()), len(events))
+
     matches = []
-    for event in data.get("events", []):
+    for event in events:
         parsed = _parse_match(event)
         if parsed:
             matches.append(parsed)
+
+    log.debug("get_schedule: parsed %d/%d events", len(matches), len(events))
     return matches
 
 
@@ -199,41 +219,60 @@ async def get_standings(session: aiohttp.ClientSession) -> dict | None:
     if not data:
         return None
 
+    log.debug("Standings response top-level keys: %s", list(data.keys()))
+
+    # ESPN may nest conferences under "children" or directly expose "standings"
+    groups = data.get("children") or data.get("groups") or []
+
+    if not groups:
+        log.warning("Standings: no 'children' or 'groups' key found. Keys: %s", list(data.keys()))
+        return None
+
     standings = {}
-    for group in data.get("children", []):
+    for group in groups:
         conf_name = group.get("name", "Conference")
         entries = []
-        for entry in group.get("standings", {}).get("entries", []):
+
+        # Standings entries can live at group.standings.entries or group.entries
+        raw_entries = (
+            group.get("standings", {}).get("entries")
+            or group.get("entries")
+            or []
+        )
+
+        for entry in raw_entries:
             team = entry.get("team", {})
+            logo = team.get("logo") or (team.get("logos") or [{}])[0].get("href", "")
             stats = {}
             for s in entry.get("stats", []):
                 stats[s.get("name", "")] = s.get("displayValue", s.get("value", ""))
             entries.append({
                 "name": team.get("displayName", ""),
                 "abbreviation": team.get("abbreviation", ""),
-                "logo": team.get("logos", [{}])[0].get("href", "") if team.get("logos") else "",
+                "logo": logo,
                 "stats": stats,
-                "is_whitecaps": team.get("id") == WHITECAPS_ID
-                or team.get("displayName") in WHITECAPS_NAMES,
+                "is_whitecaps": (
+                    str(team.get("id", "")) == WHITECAPS_ID
+                    or team.get("displayName") in WHITECAPS_NAMES
+                ),
             })
-        standings[conf_name] = entries
 
-    return standings
+        if entries:
+            standings[conf_name] = entries
+
+    log.debug("get_standings: parsed %d conference(s)", len(standings))
+    return standings if standings else None
 
 
 async def get_next_match(session: aiohttp.ClientSession) -> dict | None:
     """Get the next upcoming Whitecaps match."""
     schedule = await get_schedule(session)
     now = datetime.now(timezone.utc)
-    upcoming = []
     for m in schedule:
         try:
             match_date = datetime.fromisoformat(m["date"].replace("Z", "+00:00"))
             if match_date > now or m["status"]["state"] in ("in", "pre"):
-                upcoming.append(m)
+                return m
         except (ValueError, KeyError):
             continue
-
-    if upcoming:
-        return upcoming[0]
     return None
