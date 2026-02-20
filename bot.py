@@ -169,6 +169,20 @@ async def cmd_standings(ctx: commands.Context) -> None:
     await ctx.send(embed=embed)
 
 
+@bot.command(name="debug", aliases=["diag"])
+async def cmd_debug(ctx: commands.Context) -> None:
+    """Test each ESPN API endpoint and report results."""
+    async with ctx.typing():
+        async with aiohttp.ClientSession() as session:
+            results = await espn_api.debug_endpoints(session)
+
+    lines = [f"**{label}**\n`{info}`" for label, info in results.items()]
+    # Discord has a 2000-char limit; split if needed
+    msg = "\n\n".join(lines)
+    for chunk in [msg[i:i+1900] for i in range(0, len(msg), 1900)]:
+        await ctx.send(chunk)
+
+
 @bot.command(name="help", aliases=["h", "commands"])
 async def cmd_help(ctx: commands.Context) -> None:
     """Show available commands."""

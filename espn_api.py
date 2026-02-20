@@ -193,75 +193,89 @@ async def get_match_summary(session: aiohttp.ClientSession, event_id: str) -> di
 async def get_schedule(session: aiohttp.ClientSession) -> list[dict]:
     """Get the Whitecaps schedule (current season, all match states)."""
     year = datetime.now(timezone.utc).year
-    data = await _fetch(
-        session,
+
+    # Try with explicit season first, then without (ESPN may default differently)
+    for url in (
         f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year}",
-    )
-    if not data:
-        return []
+        f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule",
+    ):
+        data = await _fetch(session, url)
+        if not data:
+            continue
 
-    events = data.get("events", [])
-    log.debug("Schedule response top-level keys: %s; event count: %d", list(data.keys()), len(events))
+        events = data.get("events", [])
+        log.info("Schedule (%s): top keys=%s, events=%d", url.split("?")[-1], list(data.keys()), len(events))
 
-    matches = []
-    for event in events:
-        parsed = _parse_match(event)
-        if parsed:
-            matches.append(parsed)
+        matches = []
+        for event in events:
+            parsed = _parse_match(event)
+            if parsed:
+                matches.append(parsed)
 
-    log.debug("get_schedule: parsed %d/%d events", len(matches), len(events))
-    return matches
+        if matches:
+            log.info("get_schedule: parsed %d/%d events", len(matches), len(events))
+            return matches
+        log.info("Schedule returned %d events but 0 parsed; trying next URL", len(events))
+
+    return []
 
 
 async def get_standings(session: aiohttp.ClientSession) -> dict | None:
     """Get MLS standings."""
-    data = await _fetch(session, f"{BASE_URL}/standings")
-    if not data:
-        return None
+    year = datetime.now(timezone.utc).year
 
-    log.debug("Standings response top-level keys: %s", list(data.keys()))
+    # Try current season, then previous (offseason may not have current-year data)
+    for season in (year, year - 1):
+        data = await _fetch(session, f"{BASE_URL}/standings?season={season}")
+        if not data:
+            continue
 
-    # ESPN may nest conferences under "children" or directly expose "standings"
-    groups = data.get("children") or data.get("groups") or []
+        log.info("Standings (season=%d): top keys=%s", season, list(data.keys()))
 
-    if not groups:
-        log.warning("Standings: no 'children' or 'groups' key found. Keys: %s", list(data.keys()))
-        return None
+        # ESPN may nest conferences under "children" or "groups"
+        groups = data.get("children") or data.get("groups") or []
 
-    standings = {}
-    for group in groups:
-        conf_name = group.get("name", "Conference")
-        entries = []
+        if not groups:
+            log.info("Standings (season=%d): no 'children' or 'groups'. Keys: %s", season, list(data.keys()))
+            continue
 
-        # Standings entries can live at group.standings.entries or group.entries
-        raw_entries = (
-            group.get("standings", {}).get("entries")
-            or group.get("entries")
-            or []
-        )
+        standings = {}
+        for group in groups:
+            conf_name = group.get("name", "Conference")
+            entries = []
 
-        for entry in raw_entries:
-            team = entry.get("team", {})
-            logo = team.get("logo") or (team.get("logos") or [{}])[0].get("href", "")
-            stats = {}
-            for s in entry.get("stats", []):
-                stats[s.get("name", "")] = s.get("displayValue", s.get("value", ""))
-            entries.append({
-                "name": team.get("displayName", ""),
-                "abbreviation": team.get("abbreviation", ""),
-                "logo": logo,
-                "stats": stats,
-                "is_whitecaps": (
-                    str(team.get("id", "")) == WHITECAPS_ID
-                    or team.get("displayName") in WHITECAPS_NAMES
-                ),
-            })
+            # Standings entries can live at group.standings.entries or group.entries
+            raw_entries = (
+                group.get("standings", {}).get("entries")
+                or group.get("entries")
+                or []
+            )
 
-        if entries:
-            standings[conf_name] = entries
+            for entry in raw_entries:
+                team = entry.get("team", {})
+                logo = team.get("logo") or (team.get("logos") or [{}])[0].get("href", "")
+                stats = {}
+                for s in entry.get("stats", []):
+                    stats[s.get("name", "")] = s.get("displayValue", s.get("value", ""))
+                entries.append({
+                    "name": team.get("displayName", ""),
+                    "abbreviation": team.get("abbreviation", ""),
+                    "logo": logo,
+                    "stats": stats,
+                    "is_whitecaps": (
+                        str(team.get("id", "")) == WHITECAPS_ID
+                        or team.get("displayName") in WHITECAPS_NAMES
+                    ),
+                })
 
-    log.debug("get_standings: parsed %d conference(s)", len(standings))
-    return standings if standings else None
+            if entries:
+                standings[conf_name] = entries
+
+        if standings:
+            log.info("get_standings: parsed %d conference(s) from season %d", len(standings), season)
+            return standings
+
+    return None
 
 
 async def get_next_match(session: aiohttp.ClientSession) -> dict | None:
@@ -275,4 +289,43 @@ async def get_next_match(session: aiohttp.ClientSession) -> dict | None:
                 return m
         except (ValueError, KeyError):
             continue
+
+    # Fallback: today's scoreboard may list upcoming matches the schedule missed
+    scoreboard = await get_scoreboard(session)
+    for m in scoreboard:
+        if m["status"]["state"] in ("pre", "in"):
+            return m
     return None
+
+
+async def debug_endpoints(session: aiohttp.ClientSession) -> dict:
+    """Hit every ESPN endpoint and report raw status / top-level keys."""
+    year = datetime.now(timezone.utc).year
+    urls = {
+        "scoreboard": f"{BASE_URL}/scoreboard",
+        f"schedule (season={year})": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year}",
+        "schedule (default)": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule",
+        f"standings (season={year})": f"{BASE_URL}/standings?season={year}",
+        f"standings (season={year-1})": f"{BASE_URL}/standings?season={year-1}",
+        "standings (default)": f"{BASE_URL}/standings",
+    }
+    results = {}
+    for label, url in urls.items():
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                status = resp.status
+                if status == 200:
+                    data = await resp.json(content_type=None)
+                    keys = list(data.keys()) if isinstance(data, dict) else str(type(data))
+                    # Count items in the main list key
+                    counts = {}
+                    for k in ("events", "children", "groups"):
+                        if k in data and isinstance(data[k], list):
+                            counts[k] = len(data[k])
+                    results[label] = f"200 OK | keys: {keys} | counts: {counts}"
+                else:
+                    body = await resp.text()
+                    results[label] = f"HTTP {status} | {body[:120]}"
+        except Exception as e:
+            results[label] = f"ERROR: {e}"
+    return results
