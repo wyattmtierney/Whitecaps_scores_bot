@@ -16,12 +16,24 @@ _STAT_KEY_MAP = {
 }
 
 
+def _parse_score(raw) -> str:
+    """Handle ESPN score fields which can be a plain string OR a dict.
+
+    Scoreboard endpoint returns a plain string like "2".
+    Schedule endpoint returns a dict like
+    {"value": 2.0, "displayValue": "2", "winner": False, ...}.
+    """
+    if isinstance(raw, dict):
+        return raw.get("displayValue", str(int(raw.get("value", 0))))
+    return str(raw) if raw is not None else "0"
+
+
 async def _fetch(session: aiohttp.ClientSession, url: str) -> dict | None:
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
             if resp.status == 200:
                 data = await resp.json(content_type=None)
-                log.debug("GET %s -> 200, keys=%s", url, list(data.keys()) if isinstance(data, dict) else type(data))
+                log.debug("GET %s -> 200", url)
                 return data
             log.warning("GET %s -> HTTP %s", url, resp.status)
     except aiohttp.ClientError as e:
@@ -40,14 +52,19 @@ def _is_whitecaps(competitor: dict) -> bool:
 def _parse_competitor(comp: dict) -> dict:
     team = comp.get("team", {})
     logo = team.get("logo") or (team.get("logos") or [{}])[0].get("href", "")
+    # winner can be a bool or nested in the score dict
+    raw_score = comp.get("score")
+    winner = comp.get("winner", False)
+    if isinstance(raw_score, dict) and not isinstance(winner, bool):
+        winner = raw_score.get("winner", False)
     return {
         "id": team.get("id"),
         "name": team.get("displayName", "Unknown"),
         "abbreviation": team.get("abbreviation", "???"),
         "logo": logo,
-        "score": comp.get("score", "0"),
+        "score": _parse_score(raw_score),
         "home_away": comp.get("homeAway", ""),
-        "winner": comp.get("winner", False),
+        "winner": winner,
     }
 
 
@@ -158,6 +175,7 @@ async def get_match_summary(session: aiohttp.ClientSession, event_id: str) -> di
 
 
 async def get_schedule(session: aiohttp.ClientSession) -> list[dict]:
+    """Get Whitecaps schedule. Tries season=year-1 first due to ESPN quirk."""
     year = datetime.now(timezone.utc).year
     for url in (
         f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year - 1}",
@@ -177,6 +195,7 @@ async def get_schedule(session: aiohttp.ClientSession) -> list[dict]:
 
 
 async def get_standings(session: aiohttp.ClientSession) -> dict | None:
+    """Get MLS standings via /apis/v2/ endpoint."""
     data = await _fetch(session, STANDINGS_URL)
     if not data:
         return None
@@ -241,10 +260,7 @@ async def debug_endpoints(session: aiohttp.ClientSession) -> dict:
         "scoreboard": f"{BASE_URL}/scoreboard",
         f"schedule season={year - 1} [primary]": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year - 1}",
         f"schedule season={year}": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year}",
-        "schedule default": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule",
-        "standings v2 [primary]": STANDINGS_URL,
-        f"standings site/v2 season={year}": f"{BASE_URL}/standings?season={year}",
-        f"standings site/v2 season={year - 1}": f"{BASE_URL}/standings?season={year - 1}",
+        "standings v2": STANDINGS_URL,
     }
     results = {}
     for label, url in urls.items():
@@ -254,7 +270,7 @@ async def debug_endpoints(session: aiohttp.ClientSession) -> dict:
                 if status == 200:
                     data = await resp.json(content_type=None)
                     keys = list(data.keys()) if isinstance(data, dict) else str(type(data))
-                    counts = {k: len(data[k]) for k in ("events", "children", "groups", "entries") if k in data and isinstance(data[k], list)}
+                    counts = {k: len(data[k]) for k in ("events", "children") if k in data and isinstance(data[k], list)}
                     results[label] = f"200 OK | keys: {keys} | counts: {counts}"
                 else:
                     body = await resp.text()
