@@ -436,9 +436,6 @@ async def get_schedule(session: aiohttp.ClientSession) -> list[dict]:
 
     cached = _read_cache_section("schedule")
     return cached if isinstance(cached, list) else []
-        return matches
-
-    return await _fallback_schedule_from_the_sports_db(session)
 
 
 async def get_standings(session: aiohttp.ClientSession) -> dict | None:
