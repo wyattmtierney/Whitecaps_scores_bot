@@ -7,7 +7,8 @@ A Discord bot that tracks live Vancouver Whitecaps FC MLS matches, posts goal al
 ## Features
 
 - **Live match tracking** — auto-posts a live embed that updates every 30 seconds during a match
-- **Goal alerts** — instant goal notifications with scorer and assist info
+- **Goal + substitution alerts** — near-live notifications for major match events
+- **Kickoff/final whistle alerts** — explicit start/end match announcements
 - **Post-match summary** — final result embed with key events
 - **Commands** — `!score`, `!next`, `!schedule`, `!standings`
 
@@ -50,6 +51,7 @@ Edit `.env`:
 DISCORD_TOKEN=your_bot_token_here
 CHANNEL_ID=your_channel_id_here
 COMMAND_PREFIX=!          # optional, defaults to !
+LOG_LEVEL=INFO            # optional
 ```
 
 To get the channel ID: enable Developer Mode in Discord → right-click the channel → **Copy ID**.
@@ -93,13 +95,14 @@ Whitecaps_scores_bot/
 
 1. When the bot starts, `MatchTracker` launches as a background asyncio task.
 2. It polls the ESPN scoreboard every **5 minutes** when there is no active match.
-3. When a live match is detected, the poll interval drops to **30 seconds**.
-4. Each tick it:
+3. If a match is scheduled (`pre`), poll interval tightens to **60 seconds** to catch kickoff quickly.
+4. When a live match is detected, the poll interval drops to **30 seconds**.
+5. Each tick it:
    - Fetches the match summary (key events)
    - Compares events against a seen-events set to detect new goals/cards
    - Posts goal alert embeds for new goals
    - Edits the pinned live embed with the current score and clock
-5. When the match ends it posts a final result embed and returns to idle polling.
+6. When the match ends it posts a final result embed and returns to idle polling.
 
 ---
 
