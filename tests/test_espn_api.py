@@ -163,6 +163,30 @@ class TestSelectionLogic(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match["id"], "b")
 
+    async def test_next_match_handles_dates_with_offset_and_z(self):
+        original_get_schedule = espn_api.get_schedule
+        original_get_scoreboard = espn_api.get_scoreboard
+
+        async def fake_schedule(_session):
+            return [
+                {"id": "a", "date": "2099-01-03T00:00:00+00:00Z", "status": {"state": "pre"}},
+                {"id": "b", "date": "2099-01-01T00:00:00+00:00Z", "status": {"state": "pre"}},
+            ]
+
+        async def fake_scoreboard(_session):
+            return []
+
+        try:
+            espn_api.get_schedule = fake_schedule
+            espn_api.get_scoreboard = fake_scoreboard
+            match = await espn_api.get_next_match(session=None)
+        finally:
+            espn_api.get_schedule = original_get_schedule
+            espn_api.get_scoreboard = original_get_scoreboard
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match["id"], "b")
+
     async def test_schedule_fallback_uses_the_sports_db_when_espn_empty(self):
         original_fetch = espn_api._fetch
         original_schedule_urls = espn_api._schedule_urls

@@ -114,12 +114,40 @@ def _parse_score(raw) -> str:
             return str(value)
     return str(raw) if raw is not None else "0"
 
+        value = raw.get("value")
+        if value in (None, ""):
+            return "0"
 
-def _to_float(value: str | int | float | None, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
+        try:
+            return str(int(float(value)))
+        except (TypeError, ValueError):
+            return str(value)
+    return str(raw) if raw is not None else "0"
+
+
+def _parse_match_datetime(value: str | None) -> datetime | None:
+    """Parse match datetime and normalize to timezone-aware UTC."""
+    if not value:
+        return None
+
+    candidates = [value]
+    if value.endswith("+00:00Z"):
+        candidates.append(value.removesuffix("Z"))
+
+    dt = None
+    for candidate in candidates:
+        try:
+            dt = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+            break
+        except ValueError:
+            continue
+
+    if dt is None:
+        return None
+
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 async def _fetch(session: aiohttp.ClientSession, url: str) -> dict | None:
@@ -519,13 +547,14 @@ async def get_next_match(session: aiohttp.ClientSession) -> dict | None:
 
     for m in schedule:
         try:
-            match_date = datetime.fromisoformat(m["date"].replace("Z", "+00:00"))
             state = m.get("status", {}).get("state", "pre")
             if state == "in":
                 return m
-            if match_date >= now and state in ("pre", "in", "post"):
+
+            match_date = _parse_match_datetime(m.get("date"))
+            if match_date and match_date >= now and state in ("pre", "in", "post"):
                 upcoming.append((match_date, m))
-        except (ValueError, KeyError, AttributeError):
+        except (KeyError, AttributeError):
             continue
 
     if upcoming:
