@@ -252,24 +252,39 @@ async def get_match_summary(session: aiohttp.ClientSession, event_id: str) -> di
     return {"key_events": key_events, "rosters": rosters, "commentary": details, "formations": formations}
 
 
-async def get_schedule(session: aiohttp.ClientSession) -> list[dict]:
-    """Get Whitecaps schedule. Tries season=year-1 first due to ESPN quirk."""
+def _schedule_urls() -> list[str]:
+    """Build schedule URLs across nearby seasons to capture full current calendar."""
     year = datetime.now(timezone.utc).year
-    for url in (
+    urls = [
         f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year - 1}",
         f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year}",
+        f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year + 1}",
         f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule",
-    ):
+    ]
+    return list(dict.fromkeys(urls))
+
+
+async def get_schedule(session: aiohttp.ClientSession) -> list[dict]:
+    """Get Whitecaps schedule by merging nearby seasons and deduplicating events."""
+    matches_by_id: dict[str, dict] = {}
+
+    for url in _schedule_urls():
         data = await _fetch(session, url)
         if not data:
             continue
+
         events = data.get("events", [])
         log.info("Schedule url=%s events=%d", url, len(events))
-        matches = [m for e in events for m in [_parse_match(e)] if m]
-        if matches:
-            log.info("get_schedule: %d matches", len(matches))
-            return matches
-    return []
+
+        for event in events:
+            parsed = _parse_match(event)
+            if parsed and parsed.get("id"):
+                matches_by_id[str(parsed["id"])] = parsed
+
+    matches = list(matches_by_id.values())
+    matches.sort(key=lambda m: m.get("date", ""))
+    log.info("get_schedule: %d merged matches", len(matches))
+    return matches
 
 
 async def get_standings(session: aiohttp.ClientSession) -> dict | None:
@@ -338,6 +353,7 @@ async def debug_endpoints(session: aiohttp.ClientSession) -> dict:
         "scoreboard": f"{BASE_URL}/scoreboard",
         f"schedule season={year - 1} [primary]": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year - 1}",
         f"schedule season={year}": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year}",
+        f"schedule season={year + 1}": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year + 1}",
         "standings v2": STANDINGS_URL,
     }
     results = {}
