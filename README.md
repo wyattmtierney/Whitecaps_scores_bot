@@ -27,7 +27,7 @@ Discord bot that posts **live Vancouver Whitecaps match updates** to your server
    ```
 
    Fill in values in `.env`:
-   - `DISCORD_TOKEN` (Railway-friendly; `DISCORD_BOT_TOKEN` also supported)
+   - `DISCORD_BOT_TOKEN`
    - `API_FOOTBALL_KEY`
    - optional: `CHANNEL_ID` (fallback text channel for updates)
    - optional: `FORUM_CHANNEL_ID` (forum channel for auto-created match-day threads)
