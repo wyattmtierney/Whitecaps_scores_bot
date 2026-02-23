@@ -44,8 +44,27 @@ log = logging.getLogger(__name__)
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN", "")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))
-FORUM_CHANNEL_ID = int(os.getenv("FORUM_CHANNEL_ID", "0"))
+
+
+def _int_env(name: str, default: int = 0) -> int:
+    """Read an integer env var, safely falling back when unset/invalid."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+
+    value = raw.strip()
+    if not value:
+        return default
+
+    try:
+        return int(value)
+    except ValueError:
+        log.warning("%s=%r is not a valid integer; using %s.", name, raw, default)
+        return default
+
+
+CHANNEL_ID = _int_env("CHANNEL_ID", 0)
+FORUM_CHANNEL_ID = _int_env("FORUM_CHANNEL_ID", 0)
 PREFIX = os.getenv("COMMAND_PREFIX", "!")
 
 if not TOKEN:
