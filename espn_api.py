@@ -104,14 +104,14 @@ def _parse_score(raw) -> str:
         if display not in (None, ""):
             return str(display)
 
-        value = raw.get("value")
-        if value in (None, ""):
+        score_value = raw.get("value")
+        if score_value in (None, ""):
             return "0"
 
         try:
-            return str(int(float(value)))
+            return str(int(float(score_value)))
         except (TypeError, ValueError):
-            return str(value)
+            return str(score_value)
     return str(raw) if raw is not None else "0"
 
         value = raw.get("value")
