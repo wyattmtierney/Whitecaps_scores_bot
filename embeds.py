@@ -28,6 +28,29 @@ STATUS_EMOJI = {
 _FIELD_LIMIT = 1024
 
 
+def _parse_match_datetime(value: str | None) -> datetime | None:
+    """Parse ISO-like dates from providers and normalize to UTC."""
+    if not value:
+        return None
+
+    candidates = [value]
+    # Some providers include both offset and trailing Z; normalize that case.
+    if value.endswith("+00:00Z"):
+        candidates.append(value.removesuffix("Z"))
+
+    for candidate in candidates:
+        try:
+            dt = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    return None
+
+
 def _safe_field(value: str) -> str:
     """Truncate a field value to Discord's 1024-char limit."""
     if len(value) <= _FIELD_LIMIT:
@@ -67,7 +90,9 @@ def build_match_embed(match: dict, key_events: list[dict] | None = None) -> disc
     color = _outcome_color(match)
     if state == "pre":
         try:
-            match_dt = datetime.fromisoformat(match["date"].replace("Z", "+00:00"))
+            match_dt = _parse_match_datetime(match.get("date"))
+            if not match_dt:
+                raise ValueError("invalid match date")
             ts = int(match_dt.timestamp())
             title = f"{status_emoji} Upcoming: {home['abbreviation']} vs {away['abbreviation']}"
             description = f"{home['name']} vs {away['name']}\n{CALENDAR_EMOJI} <t:{ts}:F> (<t:{ts}:R>)"
@@ -133,12 +158,14 @@ def build_schedule_embed(matches: list[dict], max_matches: int = 8) -> discord.E
     recent = []
     for m in matches:
         try:
-            match_dt = datetime.fromisoformat(m["date"].replace("Z", "+00:00"))
+            match_dt = _parse_match_datetime(m.get("date"))
+            if not match_dt:
+                continue
             if match_dt >= now or m["status"]["state"] in ("in", "pre"):
                 upcoming.append((match_dt, m))
             else:
                 recent.append((match_dt, m))
-        except (ValueError, KeyError):
+        except KeyError:
             continue
     upcoming.sort(key=lambda x: x[0])
     recent.sort(key=lambda x: x[0], reverse=True)
@@ -170,7 +197,8 @@ def build_schedule_embed(matches: list[dict], max_matches: int = 8) -> discord.E
         lines = [_match_line(dt, m) for dt, m in upcoming[:max_matches]]
         embed.add_field(name=f"Upcoming ({len(upcoming)} total)", value=_safe_field("\n".join(lines)), inline=False)
     if recent:
-        lines = [_match_line(dt, m) for dt, m in recent[:max_matches // 2]]
+        recent_limit = max_matches if not upcoming else max_matches // 2
+        lines = [_match_line(dt, m) for dt, m in recent[:recent_limit]]
         embed.add_field(name="Recent Results", value=_safe_field("\n".join(lines)), inline=False)
     embed.set_footer(text=f"{FLAG_CANADA} Vancouver Whitecaps FC • Data: ESPN")
     embed.timestamp = datetime.now(timezone.utc)
