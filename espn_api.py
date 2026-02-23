@@ -114,12 +114,15 @@ def _parse_score(raw) -> str:
             return str(value)
     return str(raw) if raw is not None else "0"
 
+        value = raw.get("value")
+        if value in (None, ""):
+            return "0"
 
-def _to_float(value: str | int | float | None, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
+        try:
+            return str(int(float(value)))
+        except (TypeError, ValueError):
+            return str(value)
+    return str(raw) if raw is not None else "0"
 
 
 def _parse_match_datetime(value: str | None) -> datetime | None:
