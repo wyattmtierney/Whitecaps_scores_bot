@@ -1,0 +1,1 @@
+"""Whitecaps Discord bot package."""
