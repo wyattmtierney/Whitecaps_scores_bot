@@ -51,3 +51,14 @@ Discord bot that posts **live Vancouver Whitecaps match updates** to your server
 
 - The bot only posts while a Whitecaps fixture is live.
 - It deduplicates substitution posts so each event is only sent once.
+
+
+## Railway deployment notes
+
+If you host on Railway, set these service variables:
+- `DISCORD_TOKEN`
+- `CHANNEL_ID`
+- `FORUM_CHANNEL_ID` (optional)
+- `API_FOOTBALL_KEY`
+
+The bot reads `DISCORD_TOKEN` first and falls back to `DISCORD_BOT_TOKEN` for backward compatibility.

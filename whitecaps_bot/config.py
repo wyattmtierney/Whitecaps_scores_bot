@@ -4,6 +4,14 @@ import os
 from dataclasses import dataclass
 
 
+def _first_env(*names: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return ""
+
+
 @dataclass(frozen=True)
 class Settings:
     discord_token: str
@@ -17,11 +25,12 @@ class Settings:
 
     @staticmethod
     def from_env() -> "Settings":
-        discord_token = os.getenv("DISCORD_BOT_TOKEN", "")
-        api_football_key = os.getenv("API_FOOTBALL_KEY", "")
+        # Railway-friendly variable names are supported first, with backwards compatibility.
+        discord_token = _first_env("DISCORD_TOKEN", "DISCORD_BOT_TOKEN")
+        api_football_key = _first_env("API_FOOTBALL_KEY", "APIFOOTBALL_KEY")
 
         if not discord_token:
-            raise ValueError("Missing DISCORD_BOT_TOKEN environment variable.")
+            raise ValueError("Missing DISCORD_TOKEN (or DISCORD_BOT_TOKEN) environment variable.")
         if not api_football_key:
             raise ValueError("Missing API_FOOTBALL_KEY environment variable.")
 
