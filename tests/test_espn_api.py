@@ -42,6 +42,12 @@ class TestCommentaryParsing(unittest.TestCase):
         self.assertGreaterEqual(len(urls), 4)
         self.assertTrue(any("season=" in url for url in urls))
 
+    def test_parse_score_handles_unexpected_dict_shapes(self):
+        self.assertEqual(espn_api._parse_score({"displayValue": "2"}), "2")
+        self.assertEqual(espn_api._parse_score({"value": "1.0"}), "1")
+        self.assertEqual(espn_api._parse_score({"value": "abc"}), "abc")
+        self.assertEqual(espn_api._parse_score({}), "0")
+
 
 class TestScheduleAggregation(unittest.IsolatedAsyncioTestCase):
     async def test_get_schedule_merges_seasons_and_sorts(self):
@@ -75,6 +81,60 @@ class TestScheduleAggregation(unittest.IsolatedAsyncioTestCase):
             espn_api._schedule_urls = original_schedule_urls
 
         self.assertEqual([m["id"] for m in matches], ["1", "3", "2"])
+
+    async def test_get_schedule_skips_malformed_event_and_continues(self):
+        original_fetch = espn_api._fetch
+        original_schedule_urls = espn_api._schedule_urls
+
+        async def fake_fetch(_session, _url):
+            return {
+                "events": [
+                    {
+                        "id": "bad",
+                        "competitions": [{"competitors": [{"homeAway": "home", "score": {"value": "bad"}}]}],
+                    },
+                    {
+                        "id": "good",
+                        "name": "Good Event",
+                        "date": "2099-01-01T00:00:00Z",
+                        "competitions": [
+                            {
+                                "status": {"type": {"state": "pre"}},
+                                "competitors": [
+                                    {
+                                        "homeAway": "home",
+                                        "team": {
+                                            "id": espn_api.WHITECAPS_ID,
+                                            "displayName": "Vancouver Whitecaps FC",
+                                            "abbreviation": "VAN",
+                                        },
+                                        "score": "0",
+                                    },
+                                    {
+                                        "homeAway": "away",
+                                        "team": {
+                                            "id": "2",
+                                            "displayName": "Seattle Sounders",
+                                            "abbreviation": "SEA",
+                                        },
+                                        "score": "0",
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                ]
+            }
+
+        try:
+            espn_api._fetch = fake_fetch
+            espn_api._schedule_urls = lambda: ["https://espn.test/schedule"]
+            matches = await espn_api.get_schedule(session=None)
+        finally:
+            espn_api._fetch = original_fetch
+            espn_api._schedule_urls = original_schedule_urls
+
+        self.assertEqual([m["id"] for m in matches], ["good"])
 
 
 class TestSelectionLogic(unittest.IsolatedAsyncioTestCase):

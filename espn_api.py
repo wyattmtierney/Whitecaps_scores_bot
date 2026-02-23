@@ -100,7 +100,18 @@ def _parse_score(raw) -> str:
     {"value": 2.0, "displayValue": "2", "winner": False, ...}.
     """
     if isinstance(raw, dict):
-        return raw.get("displayValue", str(int(raw.get("value", 0))))
+        display = raw.get("displayValue")
+        if display not in (None, ""):
+            return str(display)
+
+        value = raw.get("value")
+        if value in (None, ""):
+            return "0"
+
+        try:
+            return str(int(float(value)))
+        except (TypeError, ValueError):
+            return str(value)
     return str(raw) if raw is not None else "0"
 
 
@@ -411,7 +422,11 @@ async def get_schedule(session: aiohttp.ClientSession) -> list[dict]:
         log.info("Schedule url=%s events=%d", url, len(events))
 
         for event in events:
-            parsed = _parse_match(event)
+            try:
+                parsed = _parse_match(event)
+            except Exception as exc:
+                log.warning("Skipping malformed schedule event id=%s: %s", event.get("id"), exc)
+                continue
             if parsed and parsed.get("id"):
                 matches_by_id[str(parsed["id"])] = parsed
 
