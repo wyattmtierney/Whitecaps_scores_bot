@@ -1,7 +1,9 @@
 """ESPN API client for fetching Vancouver Whitecaps MLS match data."""
 
+import json
 import logging
 import re
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 import aiohttp
@@ -14,6 +16,7 @@ THESPORTSDB_BASE_URL = "https://www.thesportsdb.com/api/v1/json/3"
 THESPORTSDB_WHITECAPS_ID = "134864"
 WHITECAPS_ID = "9727"
 WHITECAPS_NAMES = {"Vancouver Whitecaps FC", "Vancouver Whitecaps", "Whitecaps"}
+CACHE_FILE = Path(".whitecaps_cache.json")
 
 _STAT_KEY_MAP = {
     "ppg": "pointsPerGame",
@@ -21,6 +24,31 @@ _STAT_KEY_MAP = {
 
 _GOAL_HINTS = ("goal", "scores", "finds the net", "penalty")
 _SUB_HINTS = ("substitution", "substitutes", "comes on", "replaces")
+
+
+
+
+def _read_cache() -> dict:
+    try:
+        if CACHE_FILE.exists():
+            return json.loads(CACHE_FILE.read_text())
+    except Exception as exc:
+        log.debug("Failed to read cache: %s", exc)
+    return {}
+
+
+def _write_cache_section(key: str, value) -> None:
+    try:
+        data = _read_cache()
+        data[key] = value
+        CACHE_FILE.write_text(json.dumps(data))
+    except Exception as exc:
+        log.debug("Failed to write cache section %s: %s", key, exc)
+
+
+def _read_cache_section(key: str):
+    data = _read_cache()
+    return data.get(key)
 
 
 def _infer_commentary_event_type(text: str) -> str | None:
@@ -85,16 +113,30 @@ def _to_float(value: str | int | float | None, default: float = 0.0) -> float:
 
 async def _fetch(session: aiohttp.ClientSession, url: str) -> dict | None:
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            if resp.status == 200:
-                data = await resp.json(content_type=None)
-                log.debug("GET %s -> 200", url)
-                return data
-            log.warning("GET %s -> HTTP %s", url, resp.status)
-    except aiohttp.ClientError as e:
-        log.warning("Network error fetching %s: %s", url, e)
-    except Exception as e:
-        log.warning("Unexpected error fetching %s: %s", url, e)
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+async def _fetch(session: aiohttp.ClientSession, url: str) -> dict | None:
+    headers = {"User-Agent": "WhitecapsBot/1.0 (+https://discord.com)"}
+    last_error = None
+    for _ in range(2):
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=12), headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    log.debug("GET %s -> 200", url)
+                    return data
+                last_error = f"HTTP {resp.status}"
+                log.warning("GET %s -> HTTP %s", url, resp.status)
+        except aiohttp.ClientError as e:
+            last_error = str(e)
+            log.warning("Network error fetching %s: %s", url, e)
+        except Exception as e:
+            last_error = str(e)
+            log.warning("Unexpected error fetching %s: %s", url, e)
+    log.warning("GET %s failed after retries: %s", url, last_error)
     return None
 
 
@@ -262,6 +304,12 @@ async def get_scoreboard(session: aiohttp.ClientSession) -> list[dict]:
 
     matches = list(matches_by_id.values())
     matches.sort(key=lambda m: m.get("date", ""))
+    if matches:
+        _write_cache_section("scoreboard", matches)
+        return matches
+
+    cached = _read_cache_section("scoreboard")
+    return cached if isinstance(cached, list) else []
     return matches
 
 
@@ -378,6 +426,16 @@ async def get_schedule(session: aiohttp.ClientSession) -> list[dict]:
     matches.sort(key=lambda m: m.get("date", ""))
     log.info("get_schedule: %d merged matches", len(matches))
     if matches:
+        _write_cache_section("schedule", matches)
+        return matches
+
+    fallback = await _fallback_schedule_from_the_sports_db(session)
+    if fallback:
+        _write_cache_section("schedule", fallback)
+        return fallback
+
+    cached = _read_cache_section("schedule")
+    return cached if isinstance(cached, list) else []
         return matches
 
     return await _fallback_schedule_from_the_sports_db(session)
@@ -387,10 +445,13 @@ async def get_standings(session: aiohttp.ClientSession) -> dict | None:
     """Get MLS standings via /apis/v2/ endpoint."""
     data = await _fetch(session, STANDINGS_URL)
     if not data:
-        return None
+        cached = _read_cache_section("standings")
+        return cached if isinstance(cached, dict) else None
+
     children = data.get("children") or data.get("groups") or []
     if not children:
-        return None
+        cached = _read_cache_section("standings")
+        return cached if isinstance(cached, dict) else None
     standings = {}
     for group in children:
         conf_name = group.get("name", "Conference")
@@ -430,8 +491,11 @@ async def get_standings(session: aiohttp.ClientSession) -> dict | None:
             standings[conf_name] = entries
     if standings:
         log.info("get_standings: %d conference(s)", len(standings))
+        _write_cache_section("standings", standings)
         return standings
-    return None
+
+    cached = _read_cache_section("standings")
+    return cached if isinstance(cached, dict) else None
 
 
 async def get_next_match(session: aiohttp.ClientSession) -> dict | None:
