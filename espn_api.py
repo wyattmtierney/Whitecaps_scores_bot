@@ -112,6 +112,13 @@ def _to_float(value: str | int | float | None, default: float = 0.0) -> float:
 
 
 async def _fetch(session: aiohttp.ClientSession, url: str) -> dict | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+async def _fetch(session: aiohttp.ClientSession, url: str) -> dict | None:
     headers = {"User-Agent": "WhitecapsBot/1.0 (+https://discord.com)"}
     last_error = None
     for _ in range(2):
@@ -303,6 +310,7 @@ async def get_scoreboard(session: aiohttp.ClientSession) -> list[dict]:
 
     cached = _read_cache_section("scoreboard")
     return cached if isinstance(cached, list) else []
+    return matches
 
 
 async def get_match_summary(session: aiohttp.ClientSession, event_id: str) -> dict | None:
@@ -428,6 +436,9 @@ async def get_schedule(session: aiohttp.ClientSession) -> list[dict]:
 
     cached = _read_cache_section("schedule")
     return cached if isinstance(cached, list) else []
+        return matches
+
+    return await _fallback_schedule_from_the_sports_db(session)
 
 
 async def get_standings(session: aiohttp.ClientSession) -> dict | None:
