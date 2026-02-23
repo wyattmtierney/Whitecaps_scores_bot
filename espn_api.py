@@ -100,7 +100,18 @@ def _parse_score(raw) -> str:
     {"value": 2.0, "displayValue": "2", "winner": False, ...}.
     """
     if isinstance(raw, dict):
-        return raw.get("displayValue", str(int(raw.get("value", 0))))
+        display = raw.get("displayValue")
+        if display not in (None, ""):
+            return str(display)
+
+        score_value = raw.get("value")
+        if score_value in (None, ""):
+            return "0"
+
+        try:
+            return str(int(float(score_value)))
+        except (TypeError, ValueError):
+            return str(score_value)
     return str(raw) if raw is not None else "0"
 
 
@@ -111,11 +122,29 @@ def _to_float(value: str | int | float | None, default: float = 0.0) -> float:
         return default
 
 
-async def _fetch(session: aiohttp.ClientSession, url: str) -> dict | None:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
+def _parse_match_datetime(value: str | None) -> datetime | None:
+    """Parse match datetime and normalize to timezone-aware UTC."""
+    if not value:
+        return None
+
+    candidates = [value]
+    if value.endswith("+00:00Z"):
+        candidates.append(value.removesuffix("Z"))
+
+    dt = None
+    for candidate in candidates:
+        try:
+            dt = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+            break
+        except ValueError:
+            continue
+
+    if dt is None:
+        return None
+
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 async def _fetch(session: aiohttp.ClientSession, url: str) -> dict | None:
@@ -406,7 +435,7 @@ def _schedule_urls() -> list[str]:
 
 
 async def get_schedule(session: aiohttp.ClientSession) -> list[dict]:
-    """Get Whitecaps schedule by merging nearby seasons and deduplicating events."""
+    """Get Whitecaps schedule by merging ESPN seasons with TheSportsDB fallback."""
     matches_by_id: dict[str, dict] = {}
 
     for url in _schedule_urls():
@@ -418,27 +447,37 @@ async def get_schedule(session: aiohttp.ClientSession) -> list[dict]:
         log.info("Schedule url=%s events=%d", url, len(events))
 
         for event in events:
-            parsed = _parse_match(event)
+            try:
+                parsed = _parse_match(event)
+            except Exception as exc:
+                log.warning("Skipping malformed schedule event id=%s: %s", event.get("id"), exc)
+                continue
             if parsed and parsed.get("id"):
                 matches_by_id[str(parsed["id"])] = parsed
 
+    espn_count = len(matches_by_id)
+    fallback = await _fallback_schedule_from_the_sports_db(session)
+    for match in fallback:
+        match_id = str(match.get("id", ""))
+        if match_id and match_id not in matches_by_id:
+            matches_by_id[match_id] = match
+
+    sportsdb_added = len(matches_by_id) - espn_count
+
     matches = list(matches_by_id.values())
     matches.sort(key=lambda m: m.get("date", ""))
-    log.info("get_schedule: %d merged matches", len(matches))
+    log.info(
+        "get_schedule: %d merged matches (espn=%d, sportsdb=%d)",
+        len(matches),
+        espn_count,
+        sportsdb_added,
+    )
     if matches:
         _write_cache_section("schedule", matches)
         return matches
 
-    fallback = await _fallback_schedule_from_the_sports_db(session)
-    if fallback:
-        _write_cache_section("schedule", fallback)
-        return fallback
-
     cached = _read_cache_section("schedule")
     return cached if isinstance(cached, list) else []
-        return matches
-
-    return await _fallback_schedule_from_the_sports_db(session)
 
 
 async def get_standings(session: aiohttp.ClientSession) -> dict | None:
@@ -505,13 +544,14 @@ async def get_next_match(session: aiohttp.ClientSession) -> dict | None:
 
     for m in schedule:
         try:
-            match_date = datetime.fromisoformat(m["date"].replace("Z", "+00:00"))
             state = m.get("status", {}).get("state", "pre")
             if state == "in":
                 return m
-            if match_date >= now and state in ("pre", "in", "post"):
+
+            match_date = _parse_match_datetime(m.get("date"))
+            if match_date and match_date >= now and state in ("pre", "in", "post"):
                 upcoming.append((match_date, m))
-        except (ValueError, KeyError, AttributeError):
+        except (KeyError, AttributeError):
             continue
 
     if upcoming:
@@ -529,22 +569,34 @@ async def debug_endpoints(session: aiohttp.ClientSession) -> dict:
     year = datetime.now(timezone.utc).year
     urls = {
         "scoreboard": f"{BASE_URL}/scoreboard",
-        f"schedule season={year - 1} [primary]": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year - 1}",
-        f"schedule season={year}": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year}",
+        f"schedule season={year - 1}": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year - 1}",
+        f"schedule season={year} [primary]": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year}",
         f"schedule season={year + 1}": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year + 1}",
+        "schedule default": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule",
+        "TheSportsDB last": f"{THESPORTSDB_BASE_URL}/eventslast.php?id={THESPORTSDB_WHITECAPS_ID}",
         "TheSportsDB next": f"{THESPORTSDB_BASE_URL}/eventsnext.php?id={THESPORTSDB_WHITECAPS_ID}",
         "standings v2": STANDINGS_URL,
     }
     results = {}
     for label, url in urls.items():
         try:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=10),
+                headers={"User-Agent": "WhitecapsBot/1.0 (+https://discord.com)"},
+            ) as resp:
                 status = resp.status
                 if status == 200:
                     data = await resp.json(content_type=None)
                     keys = list(data.keys()) if isinstance(data, dict) else str(type(data))
-                    counts = {k: len(data[k]) for k in ("events", "children") if k in data and isinstance(data[k], list)}
-                    results[label] = f"200 OK | keys: {keys} | counts: {counts}"
+                    counts = {
+                        k: len(data[k])
+                        for k in ("events", "children", "results")
+                        if k in data and isinstance(data[k], list)
+                    }
+                    has_items = any(counts.get(k, 0) > 0 for k in ("events", "results", "children"))
+                    state = "OK" if has_items else "EMPTY"
+                    results[label] = f"200 {state} | keys: {keys} | counts: {counts}"
                 else:
                     body = await resp.text()
                     results[label] = f"HTTP {status} | {body[:120]}"
