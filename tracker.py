@@ -21,12 +21,18 @@ from embeds import build_match_embed, build_goal_alert_embed
 log = logging.getLogger(__name__)
 
 POLL_INTERVAL_LIVE = 30      # seconds during a live match
+POLL_INTERVAL_PRE = 60       # seconds when a match is scheduled but not started
 POLL_INTERVAL_IDLE = 300     # seconds when no match is active (5 min)
 GOAL_EVENT_TYPES = {"goal", "score", "penalty goal", "own goal"}
+SUB_EVENT_TYPES = {"substitution", "sub"}
 
 
 def _is_goal(event: dict) -> bool:
     return any(g in event.get("type", "").lower() for g in GOAL_EVENT_TYPES)
+
+
+def _is_substitution(event: dict) -> bool:
+    return any(s in event.get("type", "").lower() for s in SUB_EVENT_TYPES)
 
 
 def _format_thread_title(match: dict) -> str:
@@ -73,6 +79,7 @@ class MatchTracker:
         self._seen_events: set[str] = set()
         self._match_over: bool = False
         self._thread: discord.Thread | None = None
+        self._last_state: str | None = None
 
         self._task: asyncio.Task | None = None
 
@@ -111,9 +118,13 @@ class MatchTracker:
         self._seen_events = set()
         self._match_over = False
         self._thread = None
+        self._last_state = None
 
     def _event_key(self, event: dict) -> str:
-        return f"{event.get('type')}:{event.get('clock')}:{event.get('team_abbr')}:{event.get('participants', [{}])[0].get('name', '')}"
+        return (
+            f"{event.get('type')}:{event.get('clock')}:{event.get('team_abbr')}"
+            f":{event.get('participants', [{}])[0].get('name', '')}:{event.get('text', '')}"
+        )
 
     async def _create_forum_thread(self, match: dict) -> discord.Thread | None:
         """Create a new thread in the forum channel for this match."""
@@ -173,7 +184,7 @@ class MatchTracker:
                 log.warning("Failed to edit live embed: %s", e)
 
     async def _handle_new_events(self, match: dict, key_events: list[dict]) -> None:
-        """Detect and announce new goals/events since last poll."""
+        """Detect and announce new goals/substitutions since last poll."""
         channel = self._target_channel()
         if channel is None:
             return
@@ -191,6 +202,44 @@ class MatchTracker:
                     log.info("Posted goal alert: %s", event)
                 except discord.HTTPException as e:
                     log.warning("Failed to send goal alert: %s", e)
+            elif _is_substitution(event):
+                clock = event.get("clock", "")
+                team = event.get("team_abbr") or event.get("team") or ""
+                text = event.get("text", "Substitution")
+                try:
+                    await channel.send(f"🔄 **Substitution** `{clock}` {team} — {text}")
+                    log.info("Posted substitution alert: %s", event)
+                except discord.HTTPException as e:
+                    log.warning("Failed to send substitution alert: %s", e)
+
+    async def _post_match_started(self, match: dict) -> None:
+        channel = self._target_channel()
+        if channel is None:
+            return
+
+        home = match["home"]["abbreviation"]
+        away = match["away"]["abbreviation"]
+        try:
+            await channel.send(f"🔴 **Kickoff:** {home} vs {away} is underway!")
+            log.info("Posted kickoff alert for match %s", match["id"])
+        except discord.HTTPException as e:
+            log.warning("Failed to post kickoff alert: %s", e)
+
+    async def _post_match_finished(self, match: dict) -> None:
+        channel = self._target_channel()
+        if channel is None:
+            return
+
+        home = match["home"]
+        away = match["away"]
+        detail = match["status"].get("detail", "Full Time")
+        try:
+            await channel.send(
+                f"✅ **Final:** {home['abbreviation']} {home['score']} - {away['score']} {away['abbreviation']} ({detail})"
+            )
+            log.info("Posted final whistle alert for match %s", match["id"])
+        except discord.HTTPException as e:
+            log.warning("Failed to post final whistle alert: %s", e)
 
     async def _post_final(self, match: dict, summary: dict | None) -> None:
         """Edit the live message to a final/post-match embed."""
@@ -256,10 +305,16 @@ class MatchTracker:
         if match_id != self._current_match_id:
             self._reset_state()
             self._current_match_id = match_id
+            self._last_state = state
             log.info("Tracking match %s (state=%s)", match_id, state)
 
             # Try to create a forum thread for this match
             self._thread = await self._create_forum_thread(match)
+
+            if state == "in":
+                await self._post_match_started(match)
+            elif state == "post":
+                await self._post_match_finished(match)
 
             if state == "pre":
                 # If we didn't create a forum thread, post in fallback channel
@@ -271,7 +326,16 @@ class MatchTracker:
                             await channel.send(embed=embed)
                         except discord.HTTPException as e:
                             log.warning("Failed to send pre-match embed: %s", e)
-                return POLL_INTERVAL_IDLE
+                return POLL_INTERVAL_PRE
+
+        # Status transitions can be missed if the bot restarts mid-match, so
+        # announce kickoff/final whenever we observe a state change.
+        if self._last_state != state:
+            if state == "in":
+                await self._post_match_started(match)
+            elif state == "post":
+                await self._post_match_finished(match)
+            self._last_state = state
 
         # ---- Live match ----
         if state == "in":

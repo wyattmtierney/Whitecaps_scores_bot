@@ -1,8 +1,10 @@
 """ESPN API client for fetching Vancouver Whitecaps MLS match data."""
 
 import logging
+import re
+from datetime import datetime, timedelta, timezone
+
 import aiohttp
-from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
 
@@ -14,6 +16,50 @@ WHITECAPS_NAMES = {"Vancouver Whitecaps FC", "Vancouver Whitecaps", "Whitecaps"}
 _STAT_KEY_MAP = {
     "ppg": "pointsPerGame",
 }
+
+_GOAL_HINTS = ("goal", "scores", "finds the net", "penalty")
+_SUB_HINTS = ("substitution", "substitutes", "comes on", "replaces")
+
+
+def _infer_commentary_event_type(text: str) -> str | None:
+    lower = text.lower()
+    if any(hint in lower for hint in _GOAL_HINTS):
+        return "Goal"
+    if any(hint in lower for hint in _SUB_HINTS):
+        return "Substitution"
+    if "yellow card" in lower:
+        return "Yellow Card"
+    if "red card" in lower:
+        return "Red Card"
+    return None
+
+
+def _extract_names_from_commentary(text: str) -> list[str]:
+    # ESPN text often starts with a player name like "Ryan Gauld scores...".
+    # Keep this lightweight and resilient rather than using brittle full parsing.
+    names = re.findall(r"([A-Z][a-z]+(?:\s+[A-Z][a-z'\-]+)+)", text)
+    # preserve order while deduplicating
+    seen = set()
+    unique = []
+    for name in names:
+        if name not in seen:
+            seen.add(name)
+            unique.append(name)
+    return unique
+
+
+
+
+
+def _scoreboard_urls() -> list[str]:
+    """Build scoreboard URLs for nearby dates to avoid timezone/date-bound misses."""
+    now = datetime.now(timezone.utc)
+    days = (now - timedelta(days=1), now, now + timedelta(days=1))
+    urls = [f"{BASE_URL}/scoreboard"]
+    for day in days:
+        urls.append(f"{BASE_URL}/scoreboard?dates={day.strftime('%Y%m%d')}")
+    # preserve order while removing duplicates
+    return list(dict.fromkeys(urls))
 
 
 def _parse_score(raw) -> str:
@@ -105,18 +151,24 @@ def _parse_match(event: dict) -> dict | None:
 
 
 async def get_scoreboard(session: aiohttp.ClientSession) -> list[dict]:
-    data = await _fetch(session, f"{BASE_URL}/scoreboard")
-    if not data:
-        return []
-    matches = []
-    for event in data.get("events", []):
-        for comp in event.get("competitions", []):
-            for c in comp.get("competitors", []):
-                if _is_whitecaps(c):
-                    parsed = _parse_match(event)
-                    if parsed:
-                        matches.append(parsed)
-                    break
+    matches_by_id: dict[str, dict] = {}
+
+    for url in _scoreboard_urls():
+        data = await _fetch(session, url)
+        if not data:
+            continue
+
+        for event in data.get("events", []):
+            for comp in event.get("competitions", []):
+                for c in comp.get("competitors", []):
+                    if _is_whitecaps(c):
+                        parsed = _parse_match(event)
+                        if parsed and parsed.get("id"):
+                            matches_by_id[str(parsed["id"])] = parsed
+                        break
+
+    matches = list(matches_by_id.values())
+    matches.sort(key=lambda m: m.get("date", ""))
     return matches
 
 
@@ -160,10 +212,25 @@ async def get_match_summary(session: aiohttp.ClientSession, event_id: str) -> di
             "participants": participants,
         })
     details = []
+    commentary_events = []
     for item in data.get("commentary", []):
-        details.append({
-            "time": item.get("time", {}).get("displayValue", ""),
-            "text": item.get("text", ""),
+        text = item.get("text", "")
+        time = item.get("time", {}).get("displayValue", "")
+        details.append({"time": time, "text": text})
+
+        etype = _infer_commentary_event_type(text)
+        if not etype:
+            continue
+
+        names = _extract_names_from_commentary(text)
+        commentary_events.append({
+            "type": etype,
+            "clock": time,
+            "period": item.get("period", {}).get("number", 0),
+            "text": text,
+            "team": "",
+            "team_abbr": "",
+            "participants": [{"name": n, "id": "", "type": ""} for n in names],
         })
     formations = {}
     for roster in data.get("rosters", []):
@@ -171,27 +238,53 @@ async def get_match_summary(session: aiohttp.ClientSession, event_id: str) -> di
         formation = roster.get("formation", "")
         if formation:
             formations[team_name] = formation
+    # Merge commentary-derived events as a fallback so we can still surface
+    # substitutions/goals when ESPN's keyEvents feed is sparse.
+    for ev in commentary_events:
+        if not any(
+            existing.get("type") == ev.get("type")
+            and existing.get("clock") == ev.get("clock")
+            and existing.get("text") == ev.get("text")
+            for existing in key_events
+        ):
+            key_events.append(ev)
+
     return {"key_events": key_events, "rosters": rosters, "commentary": details, "formations": formations}
 
 
-async def get_schedule(session: aiohttp.ClientSession) -> list[dict]:
-    """Get Whitecaps schedule. Tries season=year-1 first due to ESPN quirk."""
+def _schedule_urls() -> list[str]:
+    """Build schedule URLs across nearby seasons to capture full current calendar."""
     year = datetime.now(timezone.utc).year
-    for url in (
+    urls = [
         f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year - 1}",
         f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year}",
+        f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year + 1}",
         f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule",
-    ):
+    ]
+    return list(dict.fromkeys(urls))
+
+
+async def get_schedule(session: aiohttp.ClientSession) -> list[dict]:
+    """Get Whitecaps schedule by merging nearby seasons and deduplicating events."""
+    matches_by_id: dict[str, dict] = {}
+
+    for url in _schedule_urls():
         data = await _fetch(session, url)
         if not data:
             continue
+
         events = data.get("events", [])
         log.info("Schedule url=%s events=%d", url, len(events))
-        matches = [m for e in events for m in [_parse_match(e)] if m]
-        if matches:
-            log.info("get_schedule: %d matches", len(matches))
-            return matches
-    return []
+
+        for event in events:
+            parsed = _parse_match(event)
+            if parsed and parsed.get("id"):
+                matches_by_id[str(parsed["id"])] = parsed
+
+    matches = list(matches_by_id.values())
+    matches.sort(key=lambda m: m.get("date", ""))
+    log.info("get_schedule: %d merged matches", len(matches))
+    return matches
 
 
 async def get_standings(session: aiohttp.ClientSession) -> dict | None:
@@ -260,6 +353,7 @@ async def debug_endpoints(session: aiohttp.ClientSession) -> dict:
         "scoreboard": f"{BASE_URL}/scoreboard",
         f"schedule season={year - 1} [primary]": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year - 1}",
         f"schedule season={year}": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year}",
+        f"schedule season={year + 1}": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year + 1}",
         "standings v2": STANDINGS_URL,
     }
     results = {}
