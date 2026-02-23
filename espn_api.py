@@ -10,6 +10,8 @@ log = logging.getLogger(__name__)
 
 BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/usa.1"
 STANDINGS_URL = "https://site.api.espn.com/apis/v2/sports/soccer/usa.1/standings"
+THESPORTSDB_BASE_URL = "https://www.thesportsdb.com/api/v1/json/3"
+THESPORTSDB_WHITECAPS_ID = "134864"
 WHITECAPS_ID = "9727"
 WHITECAPS_NAMES = {"Vancouver Whitecaps FC", "Vancouver Whitecaps", "Whitecaps"}
 
@@ -74,6 +76,13 @@ def _parse_score(raw) -> str:
     return str(raw) if raw is not None else "0"
 
 
+def _to_float(value: str | int | float | None, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 async def _fetch(session: aiohttp.ClientSession, url: str) -> dict | None:
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
@@ -88,6 +97,90 @@ async def _fetch(session: aiohttp.ClientSession, url: str) -> dict | None:
         log.warning("Unexpected error fetching %s: %s", url, e)
     return None
 
+
+
+def _parse_the_sports_db_event(event: dict) -> dict | None:
+    event_id = event.get("idEvent")
+    if not event_id:
+        return None
+
+    home_name = event.get("strHomeTeam", "Home")
+    away_name = event.get("strAwayTeam", "Away")
+    home_score_raw = event.get("intHomeScore")
+    away_score_raw = event.get("intAwayScore")
+
+    home_score = "0" if home_score_raw in (None, "") else str(home_score_raw)
+    away_score = "0" if away_score_raw in (None, "") else str(away_score_raw)
+
+    state = "pre"
+    detail = event.get("strStatus") or "Scheduled"
+    if home_score_raw not in (None, "") and away_score_raw not in (None, ""):
+        state = "post"
+        detail = "Final"
+
+    dt = event.get("strTimestamp")
+    if not dt:
+        date = event.get("dateEvent")
+        tm = event.get("strTime") or "00:00:00"
+        dt = f"{date}T{tm}Z" if date else ""
+
+    home_is_wc = "whitecaps" in home_name.lower()
+    away_is_wc = "whitecaps" in away_name.lower()
+
+    return {
+        "id": str(event_id),
+        "name": event.get("strEvent") or f"{away_name} at {home_name}",
+        "date": dt,
+        "venue": event.get("strVenue") or "",
+        "home": {
+            "id": event.get("idHomeTeam"),
+            "name": home_name,
+            "abbreviation": home_name.split()[-1][:3].upper() if home_name else "HOM",
+            "logo": event.get("strHomeTeamBadge") or "",
+            "score": home_score,
+            "home_away": "home",
+            "winner": _to_float(home_score) > _to_float(away_score),
+        },
+        "away": {
+            "id": event.get("idAwayTeam"),
+            "name": away_name,
+            "abbreviation": away_name.split()[-1][:3].upper() if away_name else "AWY",
+            "logo": event.get("strAwayTeamBadge") or "",
+            "score": away_score,
+            "home_away": "away",
+            "winner": _to_float(away_score) > _to_float(home_score),
+        },
+        "status": {
+            "state": state,
+            "detail": detail,
+            "description": detail,
+            "clock": "0'",
+            "period": 0,
+        },
+        "is_whitecaps_home": home_is_wc or not away_is_wc,
+    }
+
+
+async def _fallback_schedule_from_the_sports_db(session: aiohttp.ClientSession) -> list[dict]:
+    urls = (
+        f"{THESPORTSDB_BASE_URL}/eventslast.php?id={THESPORTSDB_WHITECAPS_ID}",
+        f"{THESPORTSDB_BASE_URL}/eventsnext.php?id={THESPORTSDB_WHITECAPS_ID}",
+    )
+    matches_by_id: dict[str, dict] = {}
+    for url in urls:
+        data = await _fetch(session, url)
+        if not data:
+            continue
+        for event in data.get("results") or data.get("events") or []:
+            parsed = _parse_the_sports_db_event(event)
+            if parsed and parsed.get("id"):
+                matches_by_id[str(parsed["id"])] = parsed
+
+    matches = list(matches_by_id.values())
+    matches.sort(key=lambda m: m.get("date", ""))
+    if matches:
+        log.info("TheSportsDB fallback schedule yielded %d matches", len(matches))
+    return matches
 
 def _is_whitecaps(competitor: dict) -> bool:
     name = competitor.get("team", {}).get("displayName", "")
@@ -284,7 +377,10 @@ async def get_schedule(session: aiohttp.ClientSession) -> list[dict]:
     matches = list(matches_by_id.values())
     matches.sort(key=lambda m: m.get("date", ""))
     log.info("get_schedule: %d merged matches", len(matches))
-    return matches
+    if matches:
+        return matches
+
+    return await _fallback_schedule_from_the_sports_db(session)
 
 
 async def get_standings(session: aiohttp.ClientSession) -> dict | None:
@@ -322,6 +418,14 @@ async def get_standings(session: aiohttp.ClientSession) -> dict | None:
                     or team.get("displayName") in WHITECAPS_NAMES
                 ),
             })
+        entries.sort(
+            key=lambda e: (
+                -_to_float(e.get("stats", {}).get("points"), default=-1),
+                -_to_float(e.get("stats", {}).get("pointsPerGame"), default=-1),
+                -_to_float(e.get("stats", {}).get("wins"), default=-1),
+                e.get("name", ""),
+            )
+        )
         if entries:
             standings[conf_name] = entries
     if standings:
@@ -333,16 +437,26 @@ async def get_standings(session: aiohttp.ClientSession) -> dict | None:
 async def get_next_match(session: aiohttp.ClientSession) -> dict | None:
     schedule = await get_schedule(session)
     now = datetime.now(timezone.utc)
+    upcoming: list[tuple[datetime, dict]] = []
+
     for m in schedule:
         try:
             match_date = datetime.fromisoformat(m["date"].replace("Z", "+00:00"))
-            if match_date > now or m["status"]["state"] in ("in", "pre"):
+            state = m.get("status", {}).get("state", "pre")
+            if state == "in":
                 return m
-        except (ValueError, KeyError):
+            if match_date >= now and state in ("pre", "in", "post"):
+                upcoming.append((match_date, m))
+        except (ValueError, KeyError, AttributeError):
             continue
+
+    if upcoming:
+        upcoming.sort(key=lambda pair: pair[0])
+        return upcoming[0][1]
+
     scoreboard = await get_scoreboard(session)
     for m in scoreboard:
-        if m["status"]["state"] in ("pre", "in"):
+        if m.get("status", {}).get("state") in ("pre", "in"):
             return m
     return None
 
@@ -354,6 +468,7 @@ async def debug_endpoints(session: aiohttp.ClientSession) -> dict:
         f"schedule season={year - 1} [primary]": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year - 1}",
         f"schedule season={year}": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year}",
         f"schedule season={year + 1}": f"{BASE_URL}/teams/{WHITECAPS_ID}/schedule?season={year + 1}",
+        "TheSportsDB next": f"{THESPORTSDB_BASE_URL}/eventsnext.php?id={THESPORTSDB_WHITECAPS_ID}",
         "standings v2": STANDINGS_URL,
     }
     results = {}
