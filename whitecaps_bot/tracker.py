@@ -19,7 +19,7 @@ class MatchTracker:
         if match.starts_at is None:
             date_text = "TBD"
         else:
-            local_date = match.starts_at.astimezone(timezone.utc)
+            local_date = match.starts_at.astimezone(timezone.pst)
             date_text = local_date.strftime("%B %d, %Y")
 
         if match.home_name.lower() == "vancouver whitecaps":
