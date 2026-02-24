@@ -34,7 +34,7 @@ Discord bot that posts **live Vancouver Whitecaps match updates** to your server
    - optional: `API_FOOTBALL_KEY` (fallback provider if ESPN is unavailable)
    - optional: `CHANNEL_ID` (fallback text channel for updates)
    - optional: `FORUM_CHANNEL_ID` (forum channel for auto-created match-day threads)
-   - optional: `WHITECAPS_TEAM_ID` (default `1613`, API-Football fallback team id)
+   - optional: `WHITECAPS_TEAM_ID` (default `1603`, API-Football fallback team id)
    - optional: `POLL_INTERVAL_SECONDS` (default `30`)
    - optional: `COMMAND_PREFIX` (default `!`)
 
