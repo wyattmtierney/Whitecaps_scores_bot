@@ -30,9 +30,9 @@ class MatchState:
     @property
     def state(self) -> str:
         short = (self.short_status or "").upper()
-        if short in IN_MATCH_CODES:
+        if short in {"IN", *IN_MATCH_CODES}:
             return "in"
-        if short in FINAL_CODES:
+        if short in {"POST", *FINAL_CODES}:
             return "post"
         return "pre"
 
@@ -51,7 +51,9 @@ class SubstitutionEvent:
 
 
 class ApiFootballClient:
-    def __init__(self, api_key: str, timeout_seconds: int = 15):
+    def __init__(self, api_key: str | None, timeout_seconds: int = 15):
+        if not api_key:
+            raise ValueError("API-Football client requires an API key.")
         self._headers = {
             "x-apisports-key": api_key,
         }

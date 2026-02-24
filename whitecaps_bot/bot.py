@@ -7,8 +7,9 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from whitecaps_bot.apifootball import ApiFootballClient, MatchState, with_retry
+from whitecaps_bot.apifootball import MatchState, with_retry
 from whitecaps_bot.config import Settings
+from whitecaps_bot.provider import ScoreProvider
 from whitecaps_bot.tracker import MatchTracker
 
 
@@ -23,7 +24,11 @@ class WhitecapsBot(commands.Bot):
         super().__init__(command_prefix=settings.command_prefix, intents=intents)
 
         self.settings = settings
-        self.api = ApiFootballClient(settings.api_football_key)
+        self.api = ScoreProvider(
+            settings.api_football_key,
+            settings.espn_team_id,
+            settings.espn_team_name,
+        )
         self.tracker = MatchTracker()
         self.update_task: asyncio.Task | None = None
         self.target_channel_id: int | None = settings.channel_id
