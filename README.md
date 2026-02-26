@@ -29,7 +29,7 @@ Discord bot that posts **live Vancouver Whitecaps match updates** to your server
 
    Fill in values in `.env`:
    - `DISCORD_TOKEN` (Railway-friendly; `DISCORD_BOT_TOKEN` also supported)
-   - `ESPN_TEAM_ID` (default `9720` for Vancouver Whitecaps)
+   - `ESPN_TEAM_ID` (default `9727` for Vancouver Whitecaps)
    - `ESPN_TEAM_NAME` (default `Vancouver Whitecaps`)
    - optional: `API_FOOTBALL_KEY` (fallback provider if ESPN is unavailable)
    - optional: `CHANNEL_ID` (fallback text channel for updates)
