@@ -43,7 +43,7 @@ class Settings:
             channel_id=int(channel_id) if channel_id else None,
             forum_channel_id=int(forum_channel_id) if forum_channel_id else None,
             api_football_key=api_football_key,
-            espn_team_id=os.getenv("ESPN_TEAM_ID", "9720"),
+            espn_team_id=os.getenv("ESPN_TEAM_ID", "9727"),
             espn_team_name=os.getenv("ESPN_TEAM_NAME", "Vancouver Whitecaps"),
             whitecaps_team_id=int(os.getenv("WHITECAPS_TEAM_ID", "1613")),
             poll_interval_seconds=int(os.getenv("POLL_INTERVAL_SECONDS", "30")),

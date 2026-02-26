@@ -35,7 +35,7 @@ def test_api_football_key_is_optional(monkeypatch):
 def test_espn_team_defaults_and_override(monkeypatch):
     monkeypatch.setenv("DISCORD_TOKEN", "railway-token")
     default_settings = Settings.from_env()
-    assert default_settings.espn_team_id == "9720"
+    assert default_settings.espn_team_id == "9727"
 
     monkeypatch.setenv("ESPN_TEAM_ID", "9000")
     monkeypatch.setenv("ESPN_TEAM_NAME", "Custom Team")
