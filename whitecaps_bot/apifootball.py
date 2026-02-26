@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -26,6 +26,8 @@ class MatchState:
     short_status: str
     long_status: str
     starts_at: datetime | None
+    venue: str = ""
+    broadcasts: tuple[str, ...] = ()
 
     @property
     def state(self) -> str:
