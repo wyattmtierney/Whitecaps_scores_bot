@@ -85,7 +85,6 @@ class WhitecapsBot(commands.Bot):
             return
 
         fixture_changed = self.tracker.current_fixture_id != match.fixture_id
-        thread_required = match.state in {"pre", "in"}
 
         if fixture_changed:
             self.tracker.current_fixture_id = match.fixture_id
@@ -93,14 +92,16 @@ class WhitecapsBot(commands.Bot):
             self.tracker.posted_sub_keys.clear()
             self.tracker.match_thread_id = None
 
-        if fixture_changed and thread_required:
+        # Only create a thread if the tracker approves (prevents duplicates,
+        # far-future threads, and wrong-opponent threads).
+        if fixture_changed and self.tracker.should_create_thread(match):
             destination = await self.tracker.ensure_match_thread(
                 self,
                 match,
                 forum_channel_id=self.settings.forum_channel_id,
                 fallback_channel_id=self.target_channel_id,
             )
-            await destination.send("🔔 New match thread is live. Updates will be posted here.")
+            await destination.send("\U0001f514 Match thread is live. Updates will be posted here.")
 
         if self.tracker.match_thread_id is None:
             return
@@ -109,25 +110,24 @@ class WhitecapsBot(commands.Bot):
         if destination is None:
             return
 
+        # Goal alert — post a prominent embed on score change
         score = (match.home_goals, match.away_goals)
         if match.state == "in" and score != self.tracker.last_score:
             self.tracker.last_score = score
             await destination.send(embed=self.tracker.build_score_embed(match))
 
+        # Substitution alerts — post as embeds instead of plain text
         if match.state == "in":
             substitutions = await with_retry(lambda: self.api.get_substitutions(match.fixture_id))
             for sub in substitutions:
                 if sub.dedupe_key in self.tracker.posted_sub_keys:
                     continue
                 self.tracker.posted_sub_keys.add(sub.dedupe_key)
-                minute = f"{sub.elapsed}'" if sub.elapsed is not None else "?"
-                await destination.send(
-                    f"🔁 **Substitution ({minute})** {sub.team_name}: "
-                    f"{sub.player_out} ⬇️ / {sub.player_in} ⬆️"
-                )
+                await destination.send(embed=self.tracker.build_sub_embed(sub))
 
+        # Full time embed
         if match.state == "post":
-            await destination.send(f"🏁 Final: {self._score_line(match)}")
+            await destination.send(embed=self.tracker.build_final_embed(match))
 
 
 def main() -> None:

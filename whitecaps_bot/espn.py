@@ -83,6 +83,26 @@ class EspnClient:
         if date_raw:
             starts_at = datetime.fromisoformat(date_raw.replace("Z", "+00:00")).astimezone(timezone.utc)
 
+        # Venue
+        venue = (comp.get("venue") or {}).get("fullName", "")
+
+        # Broadcasts
+        broadcasts: list[str] = []
+        for b in comp.get("broadcasts", []):
+            names = b.get("names", [])
+            if names:
+                broadcasts.extend(names)
+            else:
+                media = b.get("media", {})
+                short = media.get("shortName") or media.get("name", "")
+                if short:
+                    broadcasts.append(short)
+        for gb in comp.get("geoBroadcasts", []):
+            media = gb.get("media", {})
+            short = media.get("shortName") or media.get("name", "")
+            if short and short not in broadcasts:
+                broadcasts.append(short)
+
         return MatchState(
             fixture_id=int(event.get("id")),
             home_name=home_name,
@@ -93,6 +113,8 @@ class EspnClient:
             short_status=(status_type.get("state") or "pre").upper(),
             long_status=status_type.get("detail") or status_type.get("description") or "",
             starts_at=starts_at,
+            venue=venue,
+            broadcasts=tuple(broadcasts),
         )
 
     async def get_current_or_next_whitecaps_fixture(self) -> tuple[MatchState | None, str | None]:
