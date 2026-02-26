@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from whitecaps_bot.apifootball import ApiFootballClient, MatchState, SubstitutionEvent
+from whitecaps_bot.apifootball import ApiFootballClient, CardEvent, MatchState, StandingsEntry, SubstitutionEvent
 from whitecaps_bot.espn import EspnClient
 
 logger = logging.getLogger("whitecaps_bot.provider")
@@ -27,6 +27,20 @@ class ScoreProvider:
             return None
 
         return await self.api_football.get_current_or_next_whitecaps_fixture(team_id)
+
+    async def get_upcoming_fixtures(self) -> list[MatchState]:
+        return await self.espn.get_upcoming_fixtures()
+
+    async def get_standings(self) -> list[StandingsEntry]:
+        return await self.espn.get_standings()
+
+    async def get_cards(self, fixture_id: int) -> list[CardEvent]:
+        if self._last_espn_event_id:
+            try:
+                return await self.espn.get_cards(self._last_espn_event_id, fixture_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("ESPN cards fetch failed")
+        return []
 
     async def get_substitutions(self, fixture_id: int) -> list[SubstitutionEvent]:
         if self._last_espn_event_id:

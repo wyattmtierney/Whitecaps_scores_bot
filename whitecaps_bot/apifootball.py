@@ -38,6 +38,14 @@ class MatchState:
             return "post"
         return "pre"
 
+    @property
+    def is_halftime(self) -> bool:
+        short = (self.short_status or "").upper()
+        if short == "HT":
+            return True
+        long_lower = (self.long_status or "").lower()
+        return "halftime" in long_lower or "half time" in long_lower or "half-time" in long_lower
+
 
 @dataclass(frozen=True)
 class SubstitutionEvent:
@@ -50,6 +58,33 @@ class SubstitutionEvent:
     @property
     def dedupe_key(self) -> str:
         return f"{self.fixture_id}:{self.elapsed}:{self.team_name}:{self.player_in}:{self.player_out}"
+
+
+@dataclass(frozen=True)
+class CardEvent:
+    fixture_id: int
+    elapsed: int | None
+    team_name: str
+    player_name: str
+    card_type: str  # "Yellow Card" or "Red Card"
+
+    @property
+    def dedupe_key(self) -> str:
+        return f"{self.fixture_id}:{self.elapsed}:{self.team_name}:{self.player_name}:{self.card_type}"
+
+
+@dataclass(frozen=True)
+class StandingsEntry:
+    rank: int
+    team_name: str
+    played: int
+    wins: int
+    draws: int
+    losses: int
+    goals_for: int
+    goals_against: int
+    goal_difference: int
+    points: int
 
 
 class ApiFootballClient:
