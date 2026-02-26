@@ -34,8 +34,8 @@ class WhitecapsBot(commands.Bot):
         self.target_channel_id: int | None = settings.channel_id
 
     async def setup_hook(self) -> None:
-        @self.hybrid_command(name="whitecapslive", description="Start live Whitecaps match updates in this channel")
-        async def whitecaps_live(ctx: commands.Context):
+        @self.hybrid_command(name="live", description="Start live Whitecaps match updates in this channel")
+        async def cmd_live(ctx: commands.Context):
             self.target_channel_id = ctx.channel.id
             if self.update_task and not self.update_task.done():
                 await ctx.send("Already tracking live updates.")
@@ -44,23 +44,23 @@ class WhitecapsBot(commands.Bot):
             self.update_task = asyncio.create_task(self._live_update_loop())
             await ctx.send("Started live Whitecaps updates (scores, cards & substitutions).")
 
-        @self.hybrid_command(name="whitecapsstop", description="Stop live Whitecaps match updates")
-        async def whitecaps_stop(ctx: commands.Context):
+        @self.hybrid_command(name="stop", description="Stop live Whitecaps match updates")
+        async def cmd_stop(ctx: commands.Context):
             if self.update_task and not self.update_task.done():
                 self.update_task.cancel()
                 self.update_task = None
             await ctx.send("Stopped live Whitecaps updates.")
 
-        @self.hybrid_command(name="whitecapsstatus", description="Show current Whitecaps match status")
-        async def whitecaps_status(ctx: commands.Context):
+        @self.hybrid_command(name="status", description="Show current Whitecaps match status")
+        async def cmd_status(ctx: commands.Context):
             match = await with_retry(lambda: self.api.get_current_or_next_whitecaps_fixture(self.settings.whitecaps_team_id))
             if not match:
                 await ctx.send("No Whitecaps fixture available right now.")
                 return
             await ctx.send(self._score_line(match))
 
-        @self.hybrid_command(name="whitecapsupcoming", description="Show upcoming Whitecaps matches")
-        async def whitecaps_upcoming(ctx: commands.Context):
+        @self.hybrid_command(name="upcoming", description="Show upcoming Whitecaps matches")
+        async def cmd_upcoming(ctx: commands.Context):
             await ctx.defer()
             try:
                 matches = await with_retry(lambda: self.api.get_upcoming_fixtures())
@@ -72,8 +72,8 @@ class WhitecapsBot(commands.Bot):
                 return
             await ctx.send(embed=self.tracker.build_upcoming_embed(matches))
 
-        @self.hybrid_command(name="whitecapsstandings", description="Show MLS standings")
-        async def whitecaps_standings(ctx: commands.Context):
+        @self.hybrid_command(name="standings", description="Show MLS standings")
+        async def cmd_standings(ctx: commands.Context):
             await ctx.defer()
             try:
                 entries = await with_retry(lambda: self.api.get_standings())
