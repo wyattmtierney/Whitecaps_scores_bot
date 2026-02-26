@@ -35,7 +35,7 @@ class EspnFixtureRef:
 
 
 class EspnClient:
-    def __init__(self, team_id: str = "9720", team_name: str = "Vancouver Whitecaps", timeout_seconds: int = 15):
+    def __init__(self, team_id: str = "9727", team_name: str = "Vancouver Whitecaps", timeout_seconds: int = 15):
         self.team_id = str(team_id)
         self.team_name = team_name.lower()
         self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
