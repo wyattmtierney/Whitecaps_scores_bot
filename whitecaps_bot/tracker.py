@@ -12,7 +12,7 @@ PST = ZoneInfo("America/Vancouver")
 logger = logging.getLogger("whitecaps_bot.tracker")
 
 # Only create a thread if the match is within this window of kickoff.
-THREAD_CREATION_WINDOW = timedelta(hours=4)
+THREAD_CREATION_WINDOW = timedelta(hours=24)
 
 WHITECAPS_BLUE = 0x002F6C
 WHITECAPS_TEAL = 0x009CDE
