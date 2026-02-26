@@ -69,4 +69,4 @@ If you host on Railway, set these service variables:
 
 The bot reads `DISCORD_TOKEN` first and falls back to `DISCORD_BOT_TOKEN` for backward compatibility.
 
-A `Procfile` and `railway.toml` are included in the repo for one-click Railway deployment. The `railway.toml` sets the build system to Nixpacks, the start command to `python -m whitecaps_bot.bot`, and configures automatic restarts on failure.
+A `railway.toml` is included in the repo for one-click Railway deployment. It sets the build system to Nixpacks, the start command to `python -m whitecaps_bot.bot`, and configures automatic restarts on failure.

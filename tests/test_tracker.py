@@ -52,7 +52,7 @@ def test_should_create_thread_blocks_duplicate():
 def test_should_create_thread_blocks_far_future():
     tracker = MatchTracker()
     match = _make_match(
-        starts_at=datetime.now(timezone.utc) + timedelta(hours=24),
+        starts_at=datetime.now(timezone.utc) + timedelta(hours=48),
     )
     assert tracker.should_create_thread(match) is False
 
@@ -60,7 +60,7 @@ def test_should_create_thread_blocks_far_future():
 def test_should_create_thread_allows_near_kickoff():
     tracker = MatchTracker()
     match = _make_match(
-        starts_at=datetime.now(timezone.utc) + timedelta(hours=2),
+        starts_at=datetime.now(timezone.utc) + timedelta(hours=20),
     )
     assert tracker.should_create_thread(match) is True
 
