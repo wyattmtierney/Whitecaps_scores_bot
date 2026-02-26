@@ -7,11 +7,12 @@ from typing import Any
 
 import aiohttp
 
-from whitecaps_bot.apifootball import MatchState, SubstitutionEvent
+from whitecaps_bot.apifootball import CardEvent, MatchState, StandingsEntry, SubstitutionEvent
 
 
 ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard"
 ESPN_SUMMARY_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/all/summary"
+ESPN_STANDINGS_URL = "https://site.api.espn.com/apis/v2/sports/soccer/usa.1/standings"
 
 
 def _athlete_name(value: Any, default: str) -> str:
@@ -146,6 +147,61 @@ class EspnClient:
         chosen = sorted(candidates, key=lambda c: c.match.starts_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[0]
         return chosen.match, chosen.event_id
 
+    async def get_upcoming_fixtures(self, days_ahead: int = 14) -> list[MatchState]:
+        today = datetime.now(timezone.utc).date()
+        now_utc = datetime.now(timezone.utc)
+
+        seen: set[int] = set()
+        upcoming: list[MatchState] = []
+
+        for offset in range(0, days_ahead + 1):
+            day = today + timedelta(days=offset)
+            payload = await self._get(
+                ESPN_SCOREBOARD_URL,
+                {"dates": day.strftime("%Y%m%d"), "team": self.team_id},
+            )
+            for event in payload.get("events", []):
+                match = self._extract_match(event)
+                if match is not None and match.fixture_id not in seen:
+                    seen.add(match.fixture_id)
+                    if match.starts_at and match.starts_at > now_utc:
+                        upcoming.append(match)
+
+        upcoming.sort(key=lambda m: m.starts_at)
+        return upcoming[:5]
+
+    async def get_standings(self) -> list[StandingsEntry]:
+        payload = await self._get(ESPN_STANDINGS_URL, {})
+        entries: list[StandingsEntry] = []
+
+        # Handle conference-based structure (MLS has Eastern/Western)
+        raw_entries: list[dict] = []
+        if "children" in payload:
+            for child in payload["children"]:
+                for entry in child.get("standings", {}).get("entries", []):
+                    raw_entries.append(entry)
+        else:
+            for entry in payload.get("standings", {}).get("entries", []):
+                raw_entries.append(entry)
+
+        for idx, entry in enumerate(raw_entries, 1):
+            team = entry.get("team", {})
+            stats = {s.get("name", ""): s.get("value", 0) for s in entry.get("stats", [])}
+            entries.append(StandingsEntry(
+                rank=idx,
+                team_name=team.get("displayName", "Unknown"),
+                played=int(stats.get("gamesPlayed", 0)),
+                wins=int(stats.get("wins", 0)),
+                draws=int(stats.get("ties", stats.get("draws", 0))),
+                losses=int(stats.get("losses", 0)),
+                goals_for=int(stats.get("pointsFor", 0)),
+                goals_against=int(stats.get("pointsAgainst", 0)),
+                goal_difference=int(stats.get("pointDifferential", 0)),
+                points=int(stats.get("points", 0)),
+            ))
+
+        return entries
+
     async def get_substitutions(self, event_id: str, fixture_id: int) -> list[SubstitutionEvent]:
         payload = await self._get(ESPN_SUMMARY_URL, {"event": event_id})
         plays = payload.get("plays", [])
@@ -168,3 +224,54 @@ class EspnClient:
             )
 
         return substitutions
+
+    async def get_cards(self, event_id: str, fixture_id: int) -> list[CardEvent]:
+        payload = await self._get(ESPN_SUMMARY_URL, {"event": event_id})
+        plays = payload.get("plays", [])
+        cards: list[CardEvent] = []
+
+        for play in plays:
+            text = (play.get("text") or "").lower()
+            card_type = None
+            if "red card" in text:
+                card_type = "Red Card"
+            elif "yellow card" in text or "booking" in text:
+                card_type = "Yellow Card"
+
+            if card_type is None:
+                continue
+
+            team = ((play.get("team") or {}).get("displayName")) or "Unknown team"
+            minute = play.get("clock", {}).get("value")
+            player = self._extract_card_player(play)
+
+            cards.append(CardEvent(
+                fixture_id=fixture_id,
+                elapsed=int(minute) if isinstance(minute, (int, float)) else None,
+                team_name=team,
+                player_name=player,
+                card_type=card_type,
+            ))
+
+        return cards
+
+    @staticmethod
+    def _extract_card_player(play: dict) -> str:
+        for p in play.get("participants", []):
+            if isinstance(p, dict):
+                athlete = p.get("athlete", {})
+                if isinstance(athlete, dict):
+                    name = athlete.get("displayName") or athlete.get("shortName")
+                    if name:
+                        return name
+        # Fall back to parsing from text like "Yellow Card - John Smith"
+        original_text = play.get("text") or ""
+        parts = original_text.split(" - ", 1)
+        if len(parts) > 1:
+            name_part = parts[1].strip()
+            paren = name_part.find("(")
+            if paren > 0:
+                name_part = name_part[:paren].strip()
+            if name_part:
+                return name_part
+        return "Unknown"

@@ -34,30 +34,64 @@ class WhitecapsBot(commands.Bot):
         self.target_channel_id: int | None = settings.channel_id
 
     async def setup_hook(self) -> None:
-        @self.command(name="whitecapslive")
-        async def whitecaps_live(ctx: commands.Context):
+        @self.hybrid_command(name="live", description="Start live Whitecaps match updates in this channel")
+        async def cmd_live(ctx: commands.Context):
             self.target_channel_id = ctx.channel.id
             if self.update_task and not self.update_task.done():
                 await ctx.send("Already tracking live updates.")
                 return
 
             self.update_task = asyncio.create_task(self._live_update_loop())
-            await ctx.send("Started live Whitecaps updates (scores + substitutions).")
+            await ctx.send("Started live Whitecaps updates (scores, cards & substitutions).")
 
-        @self.command(name="whitecapsstop")
-        async def whitecaps_stop(ctx: commands.Context):
+        @self.hybrid_command(name="stop", description="Stop live Whitecaps match updates")
+        async def cmd_stop(ctx: commands.Context):
             if self.update_task and not self.update_task.done():
                 self.update_task.cancel()
                 self.update_task = None
             await ctx.send("Stopped live Whitecaps updates.")
 
-        @self.command(name="whitecapsstatus")
-        async def whitecaps_status(ctx: commands.Context):
+        @self.hybrid_command(name="status", description="Show current Whitecaps match status")
+        async def cmd_status(ctx: commands.Context):
             match = await with_retry(lambda: self.api.get_current_or_next_whitecaps_fixture(self.settings.whitecaps_team_id))
             if not match:
                 await ctx.send("No Whitecaps fixture available right now.")
                 return
             await ctx.send(self._score_line(match))
+
+        @self.hybrid_command(name="upcoming", description="Show upcoming Whitecaps matches")
+        async def cmd_upcoming(ctx: commands.Context):
+            await ctx.defer()
+            try:
+                matches = await with_retry(lambda: self.api.get_upcoming_fixtures())
+            except RuntimeError:
+                await ctx.send("Could not fetch upcoming matches. Try again later.")
+                return
+            if not matches:
+                await ctx.send("No upcoming Whitecaps matches found.")
+                return
+            await ctx.send(embed=self.tracker.build_upcoming_embed(matches))
+
+        @self.hybrid_command(name="standings", description="Show MLS standings")
+        async def cmd_standings(ctx: commands.Context):
+            await ctx.defer()
+            try:
+                entries = await with_retry(lambda: self.api.get_standings())
+            except RuntimeError:
+                await ctx.send("Could not fetch MLS standings. Try again later.")
+                return
+            if not entries:
+                await ctx.send("MLS standings not available right now.")
+                return
+            await ctx.send(embed=self.tracker.build_standings_embed(entries))
+
+        # Sync slash commands to Discord
+        if self.settings.discord_guild_id:
+            guild = discord.Object(id=self.settings.discord_guild_id)
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
+        else:
+            await self.tree.sync()
 
         if self.settings.channel_id or self.settings.forum_channel_id:
             self.update_task = asyncio.create_task(self._live_update_loop())
@@ -65,7 +99,7 @@ class WhitecapsBot(commands.Bot):
     @staticmethod
     def _score_line(match: MatchState) -> str:
         minute = f"{match.elapsed}'" if match.elapsed is not None else "-"
-        return f"⚽ **{match.home_name} {match.home_goals} - {match.away_goals} {match.away_name}** ({minute}, {match.long_status})"
+        return f"\u26bd **{match.home_name} {match.home_goals} - {match.away_goals} {match.away_name}** ({minute}, {match.long_status})"
 
     async def _live_update_loop(self) -> None:
         await self.wait_until_ready()
@@ -90,6 +124,9 @@ class WhitecapsBot(commands.Bot):
             self.tracker.current_fixture_id = match.fixture_id
             self.tracker.last_score = None
             self.tracker.posted_sub_keys.clear()
+            self.tracker.posted_card_keys.clear()
+            self.tracker.halftime_posted = False
+            self.tracker.fulltime_posted = False
             self.tracker.match_thread_id = None
 
         # Only create a thread if the tracker approves (prevents duplicates,
@@ -116,17 +153,38 @@ class WhitecapsBot(commands.Bot):
             self.tracker.last_score = score
             await destination.send(embed=self.tracker.build_score_embed(match))
 
-        # Substitution alerts — post as embeds instead of plain text
+        # Card alerts
         if match.state == "in":
-            substitutions = await with_retry(lambda: self.api.get_substitutions(match.fixture_id))
-            for sub in substitutions:
-                if sub.dedupe_key in self.tracker.posted_sub_keys:
-                    continue
-                self.tracker.posted_sub_keys.add(sub.dedupe_key)
-                await destination.send(embed=self.tracker.build_sub_embed(sub))
+            try:
+                cards = await with_retry(lambda: self.api.get_cards(match.fixture_id))
+                for card in cards:
+                    if card.dedupe_key in self.tracker.posted_card_keys:
+                        continue
+                    self.tracker.posted_card_keys.add(card.dedupe_key)
+                    await destination.send(embed=self.tracker.build_card_embed(card))
+            except RuntimeError:
+                logger.warning("Card fetch failed for fixture %s", match.fixture_id)
 
-        # Full time embed
-        if match.state == "post":
+        # Substitution alerts
+        if match.state == "in":
+            try:
+                substitutions = await with_retry(lambda: self.api.get_substitutions(match.fixture_id))
+                for sub in substitutions:
+                    if sub.dedupe_key in self.tracker.posted_sub_keys:
+                        continue
+                    self.tracker.posted_sub_keys.add(sub.dedupe_key)
+                    await destination.send(embed=self.tracker.build_sub_embed(sub))
+            except RuntimeError:
+                logger.warning("Substitution fetch failed for fixture %s", match.fixture_id)
+
+        # Half-time alert
+        if match.is_halftime and not self.tracker.halftime_posted:
+            self.tracker.halftime_posted = True
+            await destination.send(embed=self.tracker.build_halftime_embed(match))
+
+        # Full-time alert (only once)
+        if match.state == "post" and not self.tracker.fulltime_posted:
+            self.tracker.fulltime_posted = True
             await destination.send(embed=self.tracker.build_final_embed(match))
 
 

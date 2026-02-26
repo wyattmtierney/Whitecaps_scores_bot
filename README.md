@@ -1,72 +1,89 @@
-# Whitecaps_scores_bot
+# Whitecaps Scores Bot
 
-Discord bot that posts **live Vancouver Whitecaps match updates** to your server, including:
-- live score updates
-- substitution alerts
+A Discord bot built for **Vancouver Whitecaps FC** fans. Get live match updates, upcoming schedules, MLS standings, and more — all delivered straight to your Discord server.
 
-## Requirements
+## Features
 
-- Python 3.11+
-- A Discord bot token
-- No API key is required for ESPN live data (primary source)
-- Optional: An [API-Football](https://www.api-football.com/) API key as fallback for fixture/events
+| Command | Description |
+|---------|-------------|
+| `/live` | Start posting live match updates in the current channel |
+| `/stop` | Stop live updates |
+| `/status` | Show the current or next Whitecaps match |
+| `/upcoming` | Show the next 5 upcoming Whitecaps matches |
+| `/standings` | Show the MLS league table |
+
+All commands work as both **slash commands** (`/live`) and **prefix commands** (`!live`).
+
+### Live match notifications
+
+When live tracking is active, the bot automatically posts:
+
+- **Goal alerts** — score change embeds with live minute and match status
+- **Yellow & red card alerts** — player name, team, and minute
+- **Substitution alerts** — player on/off with minute
+- **Half-time embed** — score summary at the break
+- **Full-time embed** — final score with win/loss/draw colour coding
+
+### Match-day threads
+
+The bot auto-creates a match-day thread in your configured forum channel **24 hours before kickoff**. All live updates are posted inside the thread to keep your server organized.
+
+## Data sources
+
+- **ESPN** (primary) — free public API, no key required
+- **API-Football** (optional fallback) — used if ESPN is unavailable
 
 ## Setup
 
-1. Install dependencies:
+### 1. Install
 
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   ```
+```bash
+pip install -e .
+```
 
-2. Configure environment variables:
+### 2. Configure
 
-   ```bash
-   cp .env.example .env
-   ```
+```bash
+cp .env.example .env
+```
 
-   Fill in values in `.env`:
-   - `DISCORD_TOKEN` (Railway-friendly; `DISCORD_BOT_TOKEN` also supported)
-   - `ESPN_TEAM_ID` (default `9727` for Vancouver Whitecaps)
-   - `ESPN_TEAM_NAME` (default `Vancouver Whitecaps`)
-   - optional: `API_FOOTBALL_KEY` (fallback provider if ESPN is unavailable)
-   - optional: `CHANNEL_ID` (fallback text channel for updates)
-   - optional: `FORUM_CHANNEL_ID` (forum channel for auto-created match-day threads)
-   - optional: `WHITECAPS_TEAM_ID` (default `1603`, API-Football fallback team id)
-   - optional: `POLL_INTERVAL_SECONDS` (default `30`)
-   - optional: `COMMAND_PREFIX` (default `!`)
+Fill in your `.env`:
 
-3. Run the bot:
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DISCORD_TOKEN` | Yes | — | Discord bot token |
+| `DISCORD_GUILD_ID` | Recommended | — | Server ID (enables instant slash command sync) |
+| `FORUM_CHANNEL_ID` | Recommended | — | Forum channel for auto-created match-day threads |
+| `CHANNEL_ID` | No | — | Fallback text channel for updates |
+| `ESPN_TEAM_ID` | No | `9727` | ESPN team ID for Vancouver Whitecaps |
+| `ESPN_TEAM_NAME` | No | `Vancouver Whitecaps` | ESPN team name for matching |
+| `API_FOOTBALL_KEY` | No | — | API-Football key (fallback provider) |
+| `WHITECAPS_TEAM_ID` | No | `1613` | API-Football team ID |
+| `POLL_INTERVAL_SECONDS` | No | `30` | How often to poll for live updates (seconds) |
+| `COMMAND_PREFIX` | No | `!` | Prefix for text commands |
 
-   ```bash
-   python -m whitecaps_bot.bot
-   ```
+### 3. Run
 
-## Discord commands
+```bash
+python -m whitecaps_bot.bot
+```
 
-- `!whitecapslive` — start posting live updates in the current channel
-- `!whitecapsstop` — stop live updates
-- `!whitecapsstatus` — fetch current live score once
+## Deployment
 
-## Notes
+### Railway (recommended)
 
-- ESPN public endpoints are used first (based on the Public-ESPN-API endpoint patterns).
-- `ESPN_TEAM_ID` and `ESPN_TEAM_NAME` let you override team matching if ESPN data changes.
-- The bot only posts while a Whitecaps fixture is live.
-- It deduplicates substitution posts so each event is only sent once.
+A `railway.toml` is included for one-click deployment. Set your environment variables as Railway service variables:
 
-## Railway deployment notes
-
-If you host on Railway, set these service variables:
 - `DISCORD_TOKEN`
+- `DISCORD_GUILD_ID`
+- `FORUM_CHANNEL_ID`
 - `CHANNEL_ID`
-- `FORUM_CHANNEL_ID` (optional)
-- `ESPN_TEAM_ID`
-- `ESPN_TEAM_NAME`
-- `API_FOOTBALL_KEY` (optional fallback provider key)
 
-The bot reads `DISCORD_TOKEN` first and falls back to `DISCORD_BOT_TOKEN` for backward compatibility.
+The bot will auto-start live tracking on boot if `CHANNEL_ID` or `FORUM_CHANNEL_ID` is set.
 
-A `railway.toml` is included in the repo for one-click Railway deployment. It sets the build system to Nixpacks, the start command to `python -m whitecaps_bot.bot`, and configures automatic restarts on failure.
+### Running tests
+
+```bash
+pip install -e .
+pytest
+```

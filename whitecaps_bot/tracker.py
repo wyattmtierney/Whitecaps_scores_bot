@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 import discord
 
-from whitecaps_bot.apifootball import MatchState, SubstitutionEvent
+from whitecaps_bot.apifootball import CardEvent, MatchState, StandingsEntry, SubstitutionEvent
 
 PST = ZoneInfo("America/Vancouver")
 logger = logging.getLogger("whitecaps_bot.tracker")
@@ -19,6 +19,8 @@ WHITECAPS_TEAL = 0x009CDE
 WIN_GREEN = 0x2ECC71
 LOSS_RED = 0xE74C3C
 DRAW_GRAY = 0x95A5A6
+YELLOW_CARD_COLOR = 0xFFCC00
+RED_CARD_COLOR = 0xFF0000
 
 
 def _abbrev(name: str) -> str:
@@ -39,6 +41,9 @@ class MatchTracker:
         self.match_thread_id: int | None = None
         self.last_score: tuple[int | None, int | None] | None = None
         self.posted_sub_keys: set[str] = set()
+        self.posted_card_keys: set[str] = set()
+        self.halftime_posted: bool = False
+        self.fulltime_posted: bool = False
         # Tracks fixture IDs that already have a forum thread (persists across resets)
         self._threads_created_for: set[int] = set()
 
@@ -170,6 +175,99 @@ class MatchTracker:
             ),
             color=color,
         )
+        embed.set_footer(text="\U0001f1e8\U0001f1e6 Vancouver Whitecaps FC \u2022 Data: ESPN")
+        embed.timestamp = datetime.now(timezone.utc)
+        return embed
+
+    @staticmethod
+    def build_card_embed(card: CardEvent) -> discord.Embed:
+        """Build a yellow/red card alert embed."""
+        minute = f"{card.elapsed}'" if card.elapsed is not None else "?"
+        is_red = card.card_type == "Red Card"
+        emoji = "\U0001f7e5" if is_red else "\U0001f7e8"
+        color = RED_CARD_COLOR if is_red else YELLOW_CARD_COLOR
+
+        embed = discord.Embed(
+            title=f"{emoji} {card.card_type} \u2014 {card.team_name}",
+            description=f"**{card.player_name}**",
+            color=color,
+        )
+        embed.add_field(name="\u23f1\ufe0f  Minute", value=minute, inline=True)
+        embed.set_footer(text="\U0001f1e8\U0001f1e6 Vancouver Whitecaps FC \u2022 Data: ESPN")
+        embed.timestamp = datetime.now(timezone.utc)
+        return embed
+
+    @staticmethod
+    def build_halftime_embed(match: MatchState) -> discord.Embed:
+        """Build a half-time score embed."""
+        embed = discord.Embed(
+            title="\u23f8\ufe0f Half Time",
+            description=(
+                f"**{match.home_name}** `{match.home_goals}` \u2014 "
+                f"`{match.away_goals}` **{match.away_name}**"
+            ),
+            color=WHITECAPS_BLUE,
+        )
+        embed.set_footer(text="\U0001f1e8\U0001f1e6 Vancouver Whitecaps FC \u2022 Data: ESPN")
+        embed.timestamp = datetime.now(timezone.utc)
+        return embed
+
+    @staticmethod
+    def build_upcoming_embed(matches: list[MatchState]) -> discord.Embed:
+        """Build an upcoming schedule embed for the next few matches."""
+        embed = discord.Embed(
+            title="\U0001f4c5 Upcoming Whitecaps Matches",
+            color=WHITECAPS_BLUE,
+        )
+
+        lines: list[str] = []
+        for i, match in enumerate(matches[:5], 1):
+            if _is_whitecaps(match.home_name):
+                matchup = f"vs **{match.away_name}** (HOME)"
+            else:
+                matchup = f"@ **{match.home_name}** (AWAY)"
+
+            parts = [f"**{i}.** {matchup}"]
+
+            if match.starts_at:
+                ts = int(match.starts_at.timestamp())
+                parts.append(f"\u2003\u23f0 <t:{ts}:F> (<t:{ts}:R>)")
+
+            if match.venue:
+                parts.append(f"\u2003\U0001f3df\ufe0f {match.venue}")
+
+            if match.broadcasts:
+                parts.append(f"\u2003\U0001f4fa {' / '.join(match.broadcasts)}")
+
+            lines.append("\n".join(parts))
+
+        embed.description = "\n\n".join(lines) if lines else "No upcoming matches found."
+        embed.set_footer(text="\U0001f1e8\U0001f1e6 Vancouver Whitecaps FC \u2022 Data: ESPN")
+        embed.timestamp = datetime.now(timezone.utc)
+        return embed
+
+    @staticmethod
+    def build_standings_embed(entries: list[StandingsEntry]) -> discord.Embed:
+        """Build an MLS standings table embed."""
+        embed = discord.Embed(
+            title="\U0001f3c6 MLS Standings",
+            color=WHITECAPS_BLUE,
+        )
+
+        header = f"{'#':>2}  {'Team':<22} {'W':>2} {'D':>2} {'L':>2} {'GD':>4} {'Pts':>3}"
+        divider = "\u2500" * 44
+        lines = [header, divider]
+
+        for entry in entries:
+            gd = f"+{entry.goal_difference}" if entry.goal_difference > 0 else str(entry.goal_difference)
+            marker = "\u25b8" if _is_whitecaps(entry.team_name) else " "
+            name = entry.team_name[:22]
+            lines.append(
+                f"{marker}{entry.rank:>2}  {name:<22} {entry.wins:>2} {entry.draws:>2} "
+                f"{entry.losses:>2} {gd:>4} {entry.points:>3}"
+            )
+
+        embed.description = f"```\n{chr(10).join(lines)}\n```"
         embed.set_footer(text="\U0001f1e8\U0001f1e6 Vancouver Whitecaps FC \u2022 Data: ESPN")
         embed.timestamp = datetime.now(timezone.utc)
         return embed
