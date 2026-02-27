@@ -22,6 +22,41 @@ DRAW_GRAY = 0x95A5A6
 YELLOW_CARD_COLOR = 0xFFCC00
 RED_CARD_COLOR = 0xFF0000
 
+# Short display names for MLS teams (keeps standings compact on mobile).
+_SHORT_NAMES: dict[str, str] = {
+    "Atlanta United FC": "Atlanta",
+    "Austin FC": "Austin",
+    "CF Montréal": "Montreal",
+    "Charlotte FC": "Charlotte",
+    "Chicago Fire FC": "Chicago",
+    "Colorado Rapids": "Colorado",
+    "Columbus Crew": "Columbus",
+    "D.C. United": "D.C. United",
+    "FC Cincinnati": "Cincinnati",
+    "FC Dallas": "FC Dallas",
+    "Houston Dynamo FC": "Houston",
+    "Inter Miami CF": "Inter Miami",
+    "LA Galaxy": "LA Galaxy",
+    "Los Angeles FC": "LAFC",
+    "Minnesota United FC": "Minnesota",
+    "Nashville SC": "Nashville",
+    "New England Revolution": "New England",
+    "New York City FC": "NYCFC",
+    "New York Red Bulls": "NY Red Bulls",
+    "Orlando City SC": "Orlando",
+    "Philadelphia Union": "Philadelphia",
+    "Portland Timbers": "Portland",
+    "Real Salt Lake": "Real Salt Lake",
+    "San Diego FC": "San Diego",
+    "San Jose Earthquakes": "San Jose",
+    "Seattle Sounders FC": "Seattle",
+    "Sporting Kansas City": "Sporting KC",
+    "St. Louis City SC": "St. Louis",
+    "Toronto FC": "Toronto",
+    "Vancouver Whitecaps FC": "Whitecaps",
+    "Vancouver Whitecaps": "Whitecaps",
+}
+
 
 def _abbrev(name: str) -> str:
     """Return a short team abbreviation from the team name."""
@@ -254,17 +289,17 @@ class MatchTracker:
             color=WHITECAPS_BLUE,
         )
 
-        header = f"{'#':>2}  {'Team':<20s} {'GP':>2} {'W':>2} {'D':>2} {'L':>2} {'GD':>4} {'Pts':>3}"
+        header = f"{'#':>2} {'Team':<14s} {'GP':>2} {'W':>2} {'D':>1} {'L':>1} {'Pts':>3}"
         divider = "\u2500" * len(header)
         lines = [header, divider]
 
         for entry in entries:
-            gd = f"+{entry.goal_difference}" if entry.goal_difference > 0 else str(entry.goal_difference)
-            marker = "\u25b8" if _is_whitecaps(entry.team_name) else " "
-            name = entry.team_name[:20]
+            is_wc = _is_whitecaps(entry.team_name)
+            marker = "\u25b8" if is_wc else " "
+            short = _SHORT_NAMES.get(entry.team_name, entry.team_name)[:14]
             lines.append(
-                f"{marker}{entry.rank:>2}  {name:<20s} {entry.played:>2} {entry.wins:>2} "
-                f"{entry.draws:>2} {entry.losses:>2} {gd:>4} {entry.points:>3}"
+                f"{marker}{entry.rank:>2} {short:<14s} {entry.played:>2} {entry.wins:>2} "
+                f"{entry.draws:>1} {entry.losses:>1} {entry.points:>3}"
             )
 
         embed.description = f"```\n{chr(10).join(lines)}\n```"
