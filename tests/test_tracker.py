@@ -138,11 +138,13 @@ def test_build_standings_embed():
     embed = MatchTracker.build_standings_embed(entries)
     assert "MLS Standings" in embed.title
     assert "LA Galaxy" in embed.description
-    assert "Vancouver Whitecaps" in embed.description
+    assert "Whitecaps" in embed.description
     # Compact monospace table format
     assert "```" in embed.description
     assert "GP" in embed.description
     assert "Pts" in embed.description
+    # No GD column
+    assert "GD" not in embed.description
     # Whitecaps row highlighted with marker
     assert "\u25b8" in embed.description
 
