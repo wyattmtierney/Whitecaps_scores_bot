@@ -16,6 +16,14 @@ ESPN_STANDINGS_URL = "https://site.api.espn.com/apis/v2/sports/soccer/usa.1/stan
 
 _CANADIAN_NETWORKS = frozenset({"TSN", "TSN1", "TSN2", "TSN3", "TSN4", "TSN5", "TSN+", "RDS", "RDS2", "CTV"})
 
+# 2026 Whitecaps matches broadcast on TSN (month, day).
+# Source: TSN published schedule.  Update each season.
+_TSN_SCHEDULE_2026 = frozenset({
+    (2, 21), (3, 7), (4, 4), (4, 17), (4, 25),
+    (5, 9), (8, 1), (8, 19), (8, 29),
+    (9, 5), (9, 19), (9, 26), (10, 10), (10, 28),
+})
+
 
 def _athlete_name(value: Any, default: str) -> str:
     if isinstance(value, str):
@@ -121,6 +129,15 @@ class EspnClient:
             lang = gb.get("lang", "")
             is_ca = "ca" in lang.lower().split("-") if lang else False
             _add_broadcast(short, is_canadian=is_ca)
+
+        # ESPN doesn't include Canadian broadcasts — inject TSN from
+        # the published TSN schedule when the match date matches.
+        if starts_at and "TSN" not in _seen:
+            from zoneinfo import ZoneInfo
+            local = starts_at.astimezone(ZoneInfo("America/Vancouver"))
+            if (local.month, local.day) in _TSN_SCHEDULE_2026:
+                broadcasts.append("TSN \U0001f1e8\U0001f1e6")
+                _seen.add("TSN")
 
         return MatchState(
             fixture_id=int(event.get("id")),
