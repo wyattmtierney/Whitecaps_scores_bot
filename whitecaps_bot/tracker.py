@@ -248,27 +248,26 @@ class MatchTracker:
 
     @staticmethod
     def build_standings_embed(entries: list[StandingsEntry]) -> discord.Embed:
-        """Build an MLS standings table embed styled like the upcoming embed."""
+        """Build a compact MLS standings table embed."""
         embed = discord.Embed(
             title="\U0001f3c6 MLS Standings",
             color=WHITECAPS_BLUE,
         )
 
-        lines: list[str] = []
+        header = f"{'#':>2}  {'Team':<20s} {'GP':>2} {'W':>2} {'D':>2} {'L':>2} {'GD':>4} {'Pts':>3}"
+        divider = "\u2500" * len(header)
+        lines = [header, divider]
+
         for entry in entries:
             gd = f"+{entry.goal_difference}" if entry.goal_difference > 0 else str(entry.goal_difference)
+            marker = "\u25b8" if _is_whitecaps(entry.team_name) else " "
+            name = entry.team_name[:20]
+            lines.append(
+                f"{marker}{entry.rank:>2}  {name:<20s} {entry.played:>2} {entry.wins:>2} "
+                f"{entry.draws:>2} {entry.losses:>2} {gd:>4} {entry.points:>3}"
+            )
 
-            if _is_whitecaps(entry.team_name):
-                prefix = f"\u25b8 **{entry.rank}.** \U0001f1e8\U0001f1e6 **{entry.team_name}**"
-            else:
-                prefix = f"**{entry.rank}.** {entry.team_name}"
-
-            parts = [prefix]
-            parts.append(f"\u2003\u26bd {entry.wins}W {entry.draws}D {entry.losses}L ({entry.played} played)")
-            parts.append(f"\u2003\U0001f4ca GD: {gd} \u2022 **Pts: {entry.points}**")
-            lines.append("\n".join(parts))
-
-        embed.description = "\n\n".join(lines) if lines else "No standings data available."
+        embed.description = f"```\n{chr(10).join(lines)}\n```"
         embed.set_footer(text="\U0001f1e8\U0001f1e6 Vancouver Whitecaps FC \u2022 Data: ESPN")
         embed.timestamp = datetime.now(timezone.utc)
         return embed

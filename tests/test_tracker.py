@@ -139,13 +139,12 @@ def test_build_standings_embed():
     assert "MLS Standings" in embed.title
     assert "LA Galaxy" in embed.description
     assert "Vancouver Whitecaps" in embed.description
-    # Rich-text style, no code blocks
-    assert "```" not in embed.description
-    assert "**1.**" in embed.description
-    assert "Pts: 23" in embed.description
-    assert "Pts: 20" in embed.description
-    # Whitecaps row highlighted with Canadian flag
-    assert "\U0001f1e8\U0001f1e6" in embed.description
+    # Compact monospace table format
+    assert "```" in embed.description
+    assert "GP" in embed.description
+    assert "Pts" in embed.description
+    # Whitecaps row highlighted with marker
+    assert "\u25b8" in embed.description
 
 
 def test_build_help_embed():
