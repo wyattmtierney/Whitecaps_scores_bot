@@ -21,7 +21,7 @@ class WhitecapsBot(commands.Bot):
     def __init__(self, settings: Settings):
         intents = discord.Intents.default()
         intents.message_content = True
-        super().__init__(command_prefix=settings.command_prefix, intents=intents)
+        super().__init__(command_prefix=settings.command_prefix, intents=intents, help_command=None)
 
         self.settings = settings
         self.api = ScoreProvider(
@@ -84,6 +84,10 @@ class WhitecapsBot(commands.Bot):
                 await ctx.send("MLS standings not available right now.")
                 return
             await ctx.send(embed=self.tracker.build_standings_embed(entries))
+
+        @self.hybrid_command(name="help", description="Show available bot commands")
+        async def cmd_help(ctx: commands.Context):
+            await ctx.send(embed=self.tracker.build_help_embed(self.settings.command_prefix))
 
         # Sync slash commands to Discord
         if self.settings.discord_guild_id:

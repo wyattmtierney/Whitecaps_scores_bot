@@ -248,26 +248,55 @@ class MatchTracker:
 
     @staticmethod
     def build_standings_embed(entries: list[StandingsEntry]) -> discord.Embed:
-        """Build an MLS standings table embed."""
+        """Build an MLS standings table embed styled like the upcoming embed."""
         embed = discord.Embed(
             title="\U0001f3c6 MLS Standings",
             color=WHITECAPS_BLUE,
         )
 
-        header = f"{'#':>2}  {'Team':<22} {'W':>2} {'D':>2} {'L':>2} {'GD':>4} {'Pts':>3}"
-        divider = "\u2500" * 44
-        lines = [header, divider]
-
+        lines: list[str] = []
         for entry in entries:
             gd = f"+{entry.goal_difference}" if entry.goal_difference > 0 else str(entry.goal_difference)
-            marker = "\u25b8" if _is_whitecaps(entry.team_name) else " "
-            name = entry.team_name[:22]
-            lines.append(
-                f"{marker}{entry.rank:>2}  {name:<22} {entry.wins:>2} {entry.draws:>2} "
-                f"{entry.losses:>2} {gd:>4} {entry.points:>3}"
-            )
 
-        embed.description = f"```\n{chr(10).join(lines)}\n```"
+            if _is_whitecaps(entry.team_name):
+                prefix = f"\u25b8 **{entry.rank}.** \U0001f1e8\U0001f1e6 **{entry.team_name}**"
+            else:
+                prefix = f"**{entry.rank}.** {entry.team_name}"
+
+            parts = [prefix]
+            parts.append(f"\u2003\u26bd {entry.wins}W {entry.draws}D {entry.losses}L ({entry.played} played)")
+            parts.append(f"\u2003\U0001f4ca GD: {gd} \u2022 **Pts: {entry.points}**")
+            lines.append("\n".join(parts))
+
+        embed.description = "\n\n".join(lines) if lines else "No standings data available."
+        embed.set_footer(text="\U0001f1e8\U0001f1e6 Vancouver Whitecaps FC \u2022 Data: ESPN")
+        embed.timestamp = datetime.now(timezone.utc)
+        return embed
+
+    @staticmethod
+    def build_help_embed(prefix: str = "!") -> discord.Embed:
+        """Build a help embed listing all available commands."""
+        embed = discord.Embed(
+            title="\U0001f1e8\U0001f1e6 Whitecaps Bot Commands",
+            color=WHITECAPS_BLUE,
+        )
+
+        cmds = [
+            (f"{prefix}live", "Start live Whitecaps match updates in this channel"),
+            (f"{prefix}stop", "Stop live Whitecaps match updates"),
+            (f"{prefix}status", "Show current Whitecaps match status"),
+            (f"{prefix}upcoming", "Show upcoming Whitecaps matches"),
+            (f"{prefix}standings", "Show MLS standings"),
+            (f"{prefix}help", "Show this help message"),
+        ]
+
+        lines: list[str] = []
+        for i, (cmd, desc) in enumerate(cmds, 1):
+            parts = [f"**{i}.** \U0001f539 **{cmd}**"]
+            parts.append(f"\u2003\U0001f4ac {desc}")
+            lines.append("\n".join(parts))
+
+        embed.description = "\n\n".join(lines)
         embed.set_footer(text="\U0001f1e8\U0001f1e6 Vancouver Whitecaps FC \u2022 Data: ESPN")
         embed.timestamp = datetime.now(timezone.utc)
         return embed
