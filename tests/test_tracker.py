@@ -110,7 +110,7 @@ def test_build_upcoming_embed():
             away_name="Toronto FC",
             starts_at=datetime(2026, 3, 1, 2, 30, tzinfo=timezone.utc),
             venue="BC Place",
-            broadcasts=("TSN", "Apple TV"),
+            broadcasts=("TSN \U0001f1e8\U0001f1e6", "Apple TV"),
         ),
         _make_match(
             home_name="Portland Timbers",
@@ -125,6 +125,9 @@ def test_build_upcoming_embed():
     assert "Portland Timbers" in embed.description
     assert "HOME" in embed.description
     assert "AWAY" in embed.description
+    # Canadian broadcast flag preserved
+    assert "\U0001f1e8\U0001f1e6" in embed.description
+    assert "TSN" in embed.description
 
 
 def test_build_standings_embed():
@@ -136,6 +139,32 @@ def test_build_standings_embed():
     assert "MLS Standings" in embed.title
     assert "LA Galaxy" in embed.description
     assert "Vancouver Whitecaps" in embed.description
+    # Rich-text style, no code blocks
+    assert "```" not in embed.description
+    assert "**1.**" in embed.description
+    assert "Pts: 23" in embed.description
+    assert "Pts: 20" in embed.description
+    # Whitecaps row highlighted with Canadian flag
+    assert "\U0001f1e8\U0001f1e6" in embed.description
+
+
+def test_build_help_embed():
+    embed = MatchTracker.build_help_embed("!")
+    assert "Commands" in embed.title
+    assert "!live" in embed.description
+    assert "!stop" in embed.description
+    assert "!status" in embed.description
+    assert "!upcoming" in embed.description
+    assert "!standings" in embed.description
+    assert "!help" in embed.description
+    assert "**1.**" in embed.description
+    assert "```" not in embed.description
+
+
+def test_build_help_embed_custom_prefix():
+    embed = MatchTracker.build_help_embed("/")
+    assert "/live" in embed.description
+    assert "/standings" in embed.description
 
 
 def test_tracker_card_keys_tracking():

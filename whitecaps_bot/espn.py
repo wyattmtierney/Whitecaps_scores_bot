@@ -14,6 +14,8 @@ ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/all/
 ESPN_SUMMARY_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/all/summary"
 ESPN_STANDINGS_URL = "https://site.api.espn.com/apis/v2/sports/soccer/usa.1/standings"
 
+_CANADIAN_NETWORKS = frozenset({"TSN", "TSN1", "TSN2", "TSN3", "TSN4", "TSN5", "TSN+", "RDS", "RDS2", "CTV"})
+
 
 def _athlete_name(value: Any, default: str) -> str:
     if isinstance(value, str):
@@ -87,22 +89,38 @@ class EspnClient:
         # Venue
         venue = (comp.get("venue") or {}).get("fullName", "")
 
-        # Broadcasts
+        # Broadcasts (flag Canadian networks with 🇨🇦)
         broadcasts: list[str] = []
+        _seen: set[str] = set()
+
+        def _add_broadcast(name: str, is_canadian: bool = False) -> None:
+            upper = name.upper()
+            if upper in _seen:
+                return
+            _seen.add(upper)
+            if is_canadian or upper in _CANADIAN_NETWORKS:
+                broadcasts.append(f"{name} \U0001f1e8\U0001f1e6")
+            else:
+                broadcasts.append(name)
+
         for b in comp.get("broadcasts", []):
             names = b.get("names", [])
             if names:
-                broadcasts.extend(names)
+                for name in names:
+                    _add_broadcast(name)
             else:
                 media = b.get("media", {})
                 short = media.get("shortName") or media.get("name", "")
                 if short:
-                    broadcasts.append(short)
+                    _add_broadcast(short)
         for gb in comp.get("geoBroadcasts", []):
             media = gb.get("media", {})
             short = media.get("shortName") or media.get("name", "")
-            if short and short not in broadcasts:
-                broadcasts.append(short)
+            if not short:
+                continue
+            lang = gb.get("lang", "")
+            is_ca = "ca" in lang.lower().split("-") if lang else False
+            _add_broadcast(short, is_canadian=is_ca)
 
         return MatchState(
             fixture_id=int(event.get("id")),
@@ -183,6 +201,13 @@ class EspnClient:
         else:
             for entry in payload.get("standings", {}).get("entries", []):
                 raw_entries.append(entry)
+
+        # Sort by points descending (goal difference as tiebreaker)
+        def _points_sort_key(entry: dict) -> tuple[int, int]:
+            stats = {s.get("name", ""): s.get("value", 0) for s in entry.get("stats", [])}
+            return (int(stats.get("points", 0)), int(stats.get("pointDifferential", 0)))
+
+        raw_entries.sort(key=_points_sort_key, reverse=True)
 
         for idx, entry in enumerate(raw_entries, 1):
             team = entry.get("team", {})
