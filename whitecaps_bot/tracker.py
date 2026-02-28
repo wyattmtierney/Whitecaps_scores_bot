@@ -109,6 +109,11 @@ class MatchTracker:
             opp_logo = match.home_logo
             location = "AWAY"
 
+        # Fallback: if the chosen logo is still the Whitecaps logo
+        # (e.g. name matching missed), pick the other one.
+        if not opp_logo or _is_whitecaps(opp_name):
+            opp_logo = match.away_logo if location == "AWAY" else match.home_logo
+
         embed = discord.Embed(
             title="\U0001f1e8\U0001f1e6  MATCH DAY",
             description=(
