@@ -102,9 +102,11 @@ class MatchTracker:
         """Build a match-day thread opening embed styled like official Whitecaps posts."""
         if _is_whitecaps(match.home_name):
             opp_name = match.away_name
+            opp_logo = match.away_logo
             location = "HOME"
         else:
             opp_name = match.home_name
+            opp_logo = match.home_logo
             location = "AWAY"
 
         embed = discord.Embed(
@@ -142,6 +144,9 @@ class MatchTracker:
             value="Drop your predictions and let's go! **#VWFC**",
             inline=False,
         )
+
+        if opp_logo:
+            embed.set_thumbnail(url=opp_logo)
 
         embed.set_footer(text="\U0001f1e8\U0001f1e6 Vancouver Whitecaps FC \u2022 Data: ESPN")
         embed.timestamp = datetime.now(timezone.utc)

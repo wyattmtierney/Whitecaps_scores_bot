@@ -75,8 +75,12 @@ class EspnClient:
         home = next((c for c in competitors if c.get("homeAway") == "home"), competitors[0])
         away = next((c for c in competitors if c.get("homeAway") == "away"), competitors[1])
 
-        home_name = (home.get("team") or {}).get("displayName", "Home")
-        away_name = (away.get("team") or {}).get("displayName", "Away")
+        home_team = home.get("team") or {}
+        away_team = away.get("team") or {}
+        home_name = home_team.get("displayName", "Home")
+        away_name = away_team.get("displayName", "Away")
+        home_logo = home_team.get("logo", "")
+        away_logo = away_team.get("logo", "")
 
         if not self._is_target_team(home, away, home_name, away_name):
             return None
@@ -151,6 +155,8 @@ class EspnClient:
             starts_at=starts_at,
             venue=venue,
             broadcasts=tuple(broadcasts),
+            home_logo=home_logo,
+            away_logo=away_logo,
         )
 
     async def get_current_or_next_whitecaps_fixture(self) -> tuple[MatchState | None, str | None]:

@@ -28,6 +28,8 @@ class MatchState:
     starts_at: datetime | None
     venue: str = ""
     broadcasts: tuple[str, ...] = ()
+    home_logo: str = ""
+    away_logo: str = ""
 
     @property
     def state(self) -> str:
