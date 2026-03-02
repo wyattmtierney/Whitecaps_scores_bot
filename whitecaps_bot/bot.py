@@ -154,9 +154,11 @@ class WhitecapsBot(commands.Bot):
         # Goal alert — post a prominent embed on score change
         score = (match.home_goals, match.away_goals)
         if match.state == "in" and score != self.tracker.last_score:
-            actually_scored = (score[0] or 0) + (score[1] or 0) > 0
+            is_kickoff = self.tracker.last_score is None and score == (0, 0)
             self.tracker.last_score = score
-            if actually_scored:
+            if is_kickoff:
+                await destination.send(embed=self.tracker.build_kickoff_embed(match))
+            else:
                 await destination.send(embed=self.tracker.build_score_embed(match))
 
         # Card alerts

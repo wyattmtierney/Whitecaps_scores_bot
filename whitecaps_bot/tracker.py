@@ -158,6 +158,21 @@ class MatchTracker:
         return embed
 
     @staticmethod
+    def build_kickoff_embed(match: MatchState) -> discord.Embed:
+        """Build a kickoff / match started embed."""
+        embed = discord.Embed(
+            title="\U0001f7e2 Kickoff!",
+            description=(
+                f"**{match.home_name}** vs **{match.away_name}**\n"
+                f"The match is underway!"
+            ),
+            color=WHITECAPS_BLUE,
+        )
+        embed.set_footer(text="\U0001f1e8\U0001f1e6 Vancouver Whitecaps FC \u2022 Data: ESPN")
+        embed.timestamp = datetime.now(timezone.utc)
+        return embed
+
+    @staticmethod
     def build_score_embed(match: MatchState) -> discord.Embed:
         """Build a prominent goal alert embed."""
         minute = f"{match.elapsed}'" if match.elapsed is not None else "-"
