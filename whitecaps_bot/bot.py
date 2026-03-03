@@ -129,6 +129,7 @@ class WhitecapsBot(commands.Bot):
             self.tracker.last_score = None
             self.tracker.posted_sub_keys.clear()
             self.tracker.posted_card_keys.clear()
+            self.tracker.posted_event_keys.clear()
             self.tracker.halftime_posted = False
             self.tracker.fulltime_posted = False
             self.tracker.match_thread_id = None
@@ -151,39 +152,25 @@ class WhitecapsBot(commands.Bot):
         if destination is None:
             return
 
-        # Goal alert — post a prominent embed on score change
+        # Kickoff detection via score tracking
         score = (match.home_goals, match.away_goals)
         if match.state == "in" and score != self.tracker.last_score:
             is_kickoff = self.tracker.last_score is None and score == (0, 0)
             self.tracker.last_score = score
             if is_kickoff:
                 await destination.send(embed=self.tracker.build_kickoff_embed(match))
-            else:
-                await destination.send(embed=self.tracker.build_score_embed(match))
 
-        # Card alerts
+        # Key events — goals, cards, subs, penalties, VAR, etc.
         if match.state == "in":
             try:
-                cards = await with_retry(lambda: self.api.get_cards(match.fixture_id))
-                for card in cards:
-                    if card.dedupe_key in self.tracker.posted_card_keys:
+                events = await with_retry(lambda: self.api.get_key_events(match.fixture_id))
+                for event in events:
+                    if event.dedupe_key in self.tracker.posted_event_keys:
                         continue
-                    self.tracker.posted_card_keys.add(card.dedupe_key)
-                    await destination.send(embed=self.tracker.build_card_embed(card))
+                    self.tracker.posted_event_keys.add(event.dedupe_key)
+                    await destination.send(embed=self.tracker.build_key_event_embed(event, match))
             except RuntimeError:
-                logger.warning("Card fetch failed for fixture %s", match.fixture_id)
-
-        # Substitution alerts
-        if match.state == "in":
-            try:
-                substitutions = await with_retry(lambda: self.api.get_substitutions(match.fixture_id))
-                for sub in substitutions:
-                    if sub.dedupe_key in self.tracker.posted_sub_keys:
-                        continue
-                    self.tracker.posted_sub_keys.add(sub.dedupe_key)
-                    await destination.send(embed=self.tracker.build_sub_embed(sub))
-            except RuntimeError:
-                logger.warning("Substitution fetch failed for fixture %s", match.fixture_id)
+                logger.warning("Key events fetch failed for fixture %s", match.fixture_id)
 
         # Half-time alert
         if match.is_halftime and not self.tracker.halftime_posted:

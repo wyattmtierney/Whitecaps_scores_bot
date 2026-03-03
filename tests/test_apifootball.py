@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from whitecaps_bot.apifootball import CardEvent, MatchState, StandingsEntry, SubstitutionEvent
+from whitecaps_bot.apifootball import CardEvent, KeyEvent, MatchState, StandingsEntry, SubstitutionEvent
 
 
 def test_substitution_dedupe_key_is_stable():
@@ -62,6 +62,30 @@ def test_is_halftime_with_espn_long_status():
         starts_at=datetime.now(timezone.utc),
     )
     assert match.is_halftime is True
+
+
+def test_key_event_dedupe_key_is_stable():
+    event = KeyEvent(
+        fixture_id=789,
+        elapsed=15,
+        team_name="Vancouver Whitecaps",
+        event_type="goal",
+        text="Goal - Brian White",
+        player_name="Brian White",
+        detail="Ryan Gauld",
+    )
+    assert event.dedupe_key == "789:15:Vancouver Whitecaps:goal:Brian White"
+
+
+def test_key_event_types():
+    for etype in ("goal", "own_goal", "penalty_goal", "penalty_miss",
+                  "yellow_card", "red_card", "substitution", "var"):
+        event = KeyEvent(
+            fixture_id=1, elapsed=10, team_name="T",
+            event_type=etype, text="t", player_name="P", detail="D",
+        )
+        assert event.event_type == etype
+        assert event.dedupe_key  # not empty
 
 
 def test_is_halftime_false_during_play():
