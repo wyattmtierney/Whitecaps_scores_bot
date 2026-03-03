@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 import discord
 
-from whitecaps_bot.apifootball import CardEvent, MatchState, StandingsEntry, SubstitutionEvent
+from whitecaps_bot.apifootball import CardEvent, KeyEvent, MatchState, StandingsEntry, SubstitutionEvent
 
 PST = ZoneInfo("America/Vancouver")
 logger = logging.getLogger("whitecaps_bot.tracker")
@@ -77,6 +77,7 @@ class MatchTracker:
         self.last_score: tuple[int | None, int | None] | None = None
         self.posted_sub_keys: set[str] = set()
         self.posted_card_keys: set[str] = set()
+        self.posted_event_keys: set[str] = set()
         self.halftime_posted: bool = False
         self.fulltime_posted: bool = False
         # Tracks fixture IDs that already have a forum thread (persists across resets)
@@ -152,6 +153,114 @@ class MatchTracker:
 
         if opp_logo:
             embed.set_thumbnail(url=opp_logo)
+
+        embed.set_footer(text="\U0001f1e8\U0001f1e6 Vancouver Whitecaps FC \u2022 Data: ESPN")
+        embed.timestamp = datetime.now(timezone.utc)
+        return embed
+
+    @staticmethod
+    def build_kickoff_embed(match: MatchState) -> discord.Embed:
+        """Build a kickoff / match started embed."""
+        embed = discord.Embed(
+            title="\U0001f7e2 Kickoff!",
+            description=(
+                f"**{match.home_name}** vs **{match.away_name}**\n"
+                f"The match is underway!"
+            ),
+            color=WHITECAPS_BLUE,
+        )
+        embed.set_footer(text="\U0001f1e8\U0001f1e6 Vancouver Whitecaps FC \u2022 Data: ESPN")
+        embed.timestamp = datetime.now(timezone.utc)
+        return embed
+
+    @staticmethod
+    def build_key_event_embed(event: KeyEvent, match: MatchState) -> discord.Embed:
+        """Build an embed for any key event type."""
+        minute = f"{event.elapsed}'" if event.elapsed is not None else "?"
+
+        if event.event_type in ("goal", "penalty_goal"):
+            is_wc_home = _is_whitecaps(match.home_name)
+            wc_goals = match.home_goals if is_wc_home else match.away_goals
+            opp_goals = match.away_goals if is_wc_home else match.home_goals
+            if wc_goals is not None and opp_goals is not None:
+                color = WIN_GREEN if wc_goals > opp_goals else LOSS_RED if opp_goals > wc_goals else WHITECAPS_TEAL
+            else:
+                color = WHITECAPS_TEAL
+            prefix = "\u26bd\u26bd\u26bd"
+            label = "Penalty GOOOAL!" if event.event_type == "penalty_goal" else "GOOOAL!"
+            embed = discord.Embed(title=f"{prefix} {label}", color=color)
+            desc = f"**{event.player_name}** ({event.team_name})"
+            if event.detail:
+                desc += f"\nAssist: **{event.detail}**"
+            desc += (
+                f"\n\n**{match.home_name}** `{match.home_goals}` \u2014 "
+                f"`{match.away_goals}` **{match.away_name}**"
+            )
+            embed.description = desc
+            embed.add_field(name="Minute", value=minute, inline=True)
+
+        elif event.event_type == "own_goal":
+            embed = discord.Embed(
+                title="\u26bd Own Goal",
+                description=(
+                    f"**{event.player_name}** ({event.team_name})\n\n"
+                    f"**{match.home_name}** `{match.home_goals}` \u2014 "
+                    f"`{match.away_goals}` **{match.away_name}**"
+                ),
+                color=WHITECAPS_TEAL,
+            )
+            embed.add_field(name="Minute", value=minute, inline=True)
+
+        elif event.event_type == "penalty_miss":
+            embed = discord.Embed(
+                title="\u274c Penalty Missed",
+                description=f"**{event.player_name}** ({event.team_name})",
+                color=WHITECAPS_TEAL,
+            )
+            embed.add_field(name="Minute", value=minute, inline=True)
+
+        elif event.event_type == "red_card":
+            embed = discord.Embed(
+                title=f"\U0001f7e5 Red Card \u2014 {event.team_name}",
+                description=f"**{event.player_name}**",
+                color=RED_CARD_COLOR,
+            )
+            embed.add_field(name="\u23f1\ufe0f  Minute", value=minute, inline=True)
+
+        elif event.event_type == "yellow_card":
+            embed = discord.Embed(
+                title=f"\U0001f7e8 Yellow Card \u2014 {event.team_name}",
+                description=f"**{event.player_name}**",
+                color=YELLOW_CARD_COLOR,
+            )
+            embed.add_field(name="\u23f1\ufe0f  Minute", value=minute, inline=True)
+
+        elif event.event_type == "substitution":
+            embed = discord.Embed(
+                title=f"\U0001f504 Substitution \u2014 {event.team_name}",
+                color=WHITECAPS_TEAL,
+            )
+            embed.description = (
+                f"\U0001f7e2 **ON:** {event.player_name}\n"
+                f"\U0001f534 **OFF:** {event.detail}"
+            )
+            embed.add_field(name="\u23f1\ufe0f  Minute", value=minute, inline=True)
+
+        elif event.event_type == "var":
+            embed = discord.Embed(
+                title=f"\U0001f4fa VAR Review \u2014 {event.team_name}",
+                description=event.text or "Video review in progress",
+                color=WHITECAPS_BLUE,
+            )
+            embed.add_field(name="\u23f1\ufe0f  Minute", value=minute, inline=True)
+
+        else:
+            embed = discord.Embed(
+                title=f"\U0001f4cb {event.event_type.replace('_', ' ').title()} \u2014 {event.team_name}",
+                description=event.text,
+                color=WHITECAPS_BLUE,
+            )
+            embed.add_field(name="\u23f1\ufe0f  Minute", value=minute, inline=True)
 
         embed.set_footer(text="\U0001f1e8\U0001f1e6 Vancouver Whitecaps FC \u2022 Data: ESPN")
         embed.timestamp = datetime.now(timezone.utc)

@@ -7,7 +7,7 @@ from typing import Any
 
 import aiohttp
 
-from whitecaps_bot.apifootball import CardEvent, MatchState, StandingsEntry, SubstitutionEvent
+from whitecaps_bot.apifootball import CardEvent, KeyEvent, MatchState, StandingsEntry, SubstitutionEvent
 
 
 ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard"
@@ -250,6 +250,140 @@ class EspnClient:
 
         return entries
 
+    async def get_key_events(self, event_id: str, fixture_id: int) -> list[KeyEvent]:
+        """Fetch all key events from the ESPN summary in a single API call."""
+        payload = await self._get(ESPN_SUMMARY_URL, {"event": event_id})
+        # Prefer the curated keyEvents list; fall back to all plays.
+        plays = payload.get("keyEvents") or payload.get("plays") or []
+        events: list[KeyEvent] = []
+
+        for play in plays:
+            event_type = self._classify_play(play)
+            if event_type is None:
+                continue
+
+            team = ((play.get("team") or {}).get("displayName")) or "Unknown"
+            minute = play.get("clock", {}).get("value")
+            elapsed = int(minute) if isinstance(minute, (int, float)) else None
+            text = play.get("text") or ""
+
+            if event_type == "substitution":
+                player_name = _athlete_name(play.get("athletesIn"), "Unknown")
+                detail = _athlete_name(play.get("athletesOut"), "Unknown")
+            elif event_type in ("goal", "penalty_goal", "own_goal"):
+                player_name, detail = self._extract_goal_info(play)
+            elif event_type in ("yellow_card", "red_card"):
+                player_name = self._extract_player(play)
+                detail = ""
+            else:
+                player_name = self._extract_player(play)
+                detail = text
+
+            events.append(KeyEvent(
+                fixture_id=fixture_id,
+                elapsed=elapsed,
+                team_name=team,
+                event_type=event_type,
+                text=text,
+                player_name=player_name,
+                detail=detail,
+            ))
+
+        return events
+
+    @staticmethod
+    def _classify_play(play: dict) -> str | None:
+        """Classify an ESPN play into a key event type, or None to skip."""
+        play_type = ((play.get("type") or {}).get("text") or "").lower()
+        text = (play.get("text") or "").lower()
+        combined = f"{play_type} {text}"
+
+        # VAR / video review — check before goals since VAR text often contains "goal"
+        if "var" in combined or "video review" in combined:
+            return "var"
+        if "no goal" in combined:
+            return None
+        if "own goal" in combined:
+            return "own_goal"
+        if "penalty" in combined and ("miss" in combined or "saved" in combined):
+            return "penalty_miss"
+        if "penalty" in combined and ("goal" in combined or "scored" in combined):
+            return "penalty_goal"
+        if "goal" in combined:
+            return "goal"
+        if "red card" in combined:
+            return "red_card"
+        if "yellow card" in combined or "booking" in combined:
+            return "yellow_card"
+        if "substitution" in combined:
+            return "substitution"
+        return None
+
+    @staticmethod
+    def _extract_player(play: dict) -> str:
+        """Extract primary player name from participants or text."""
+        for p in play.get("participants", []):
+            if isinstance(p, dict):
+                athlete = p.get("athlete", {})
+                if isinstance(athlete, dict):
+                    name = athlete.get("displayName") or athlete.get("shortName")
+                    if name:
+                        return name
+        original_text = play.get("text") or ""
+        parts = original_text.split(" - ", 1)
+        if len(parts) > 1:
+            name_part = parts[1].strip()
+            paren = name_part.find("(")
+            if paren > 0:
+                name_part = name_part[:paren].strip()
+            dot = name_part.find(".")
+            if dot > 0:
+                name_part = name_part[:dot].strip()
+            if name_part:
+                return name_part
+        return "Unknown"
+
+    @staticmethod
+    def _extract_goal_info(play: dict) -> tuple[str, str]:
+        """Extract scorer and assist from a goal play. Returns (scorer, assist)."""
+        scorer = ""
+        for p in play.get("participants", []):
+            if isinstance(p, dict):
+                athlete = p.get("athlete", {})
+                if isinstance(athlete, dict):
+                    name = athlete.get("displayName") or athlete.get("shortName")
+                    if name:
+                        scorer = name
+                        break
+
+        text = play.get("text") or ""
+        assist = ""
+        m = re.search(r'[Aa]ssisted by ([^.]+)', text)
+        if m:
+            assist = m.group(1).strip()
+        else:
+            m = re.search(r'\(([^)]+)\)', text)
+            if m:
+                inner = m.group(1).strip().lower()
+                skip = {"penalty", "header", "right foot", "left foot", "own goal", "free kick"}
+                if inner not in skip:
+                    assist = m.group(1).strip()
+
+        if not scorer:
+            parts = text.split(" - ", 1)
+            if len(parts) > 1:
+                name_part = parts[1].strip()
+                for sep in (".", "("):
+                    idx = name_part.find(sep)
+                    if idx > 0:
+                        name_part = name_part[:idx].strip()
+                if name_part:
+                    scorer = name_part
+
+        return scorer or "Unknown", assist
+
+    # Legacy methods kept for API-Football fallback compatibility.
+
     async def get_substitutions(self, event_id: str, fixture_id: int) -> list[SubstitutionEvent]:
         payload = await self._get(ESPN_SUMMARY_URL, {"event": event_id})
         plays = payload.get("plays", [])
@@ -291,7 +425,7 @@ class EspnClient:
 
             team = ((play.get("team") or {}).get("displayName")) or "Unknown team"
             minute = play.get("clock", {}).get("value")
-            player = self._extract_card_player(play)
+            player = self._extract_player(play)
 
             cards.append(CardEvent(
                 fixture_id=fixture_id,
@@ -302,24 +436,3 @@ class EspnClient:
             ))
 
         return cards
-
-    @staticmethod
-    def _extract_card_player(play: dict) -> str:
-        for p in play.get("participants", []):
-            if isinstance(p, dict):
-                athlete = p.get("athlete", {})
-                if isinstance(athlete, dict):
-                    name = athlete.get("displayName") or athlete.get("shortName")
-                    if name:
-                        return name
-        # Fall back to parsing from text like "Yellow Card - John Smith"
-        original_text = play.get("text") or ""
-        parts = original_text.split(" - ", 1)
-        if len(parts) > 1:
-            name_part = parts[1].strip()
-            paren = name_part.find("(")
-            if paren > 0:
-                name_part = name_part[:paren].strip()
-            if name_part:
-                return name_part
-        return "Unknown"

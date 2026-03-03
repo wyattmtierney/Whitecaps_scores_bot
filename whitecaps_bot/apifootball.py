@@ -76,6 +76,22 @@ class CardEvent:
 
 
 @dataclass(frozen=True)
+class KeyEvent:
+    """A unified match event parsed from ESPN's plays/keyEvents array."""
+    fixture_id: int
+    elapsed: int | None
+    team_name: str
+    event_type: str  # goal, own_goal, penalty_goal, penalty_miss, yellow_card, red_card, substitution, var
+    text: str
+    player_name: str
+    detail: str  # assist for goals, player_out for subs, reason for VAR, etc.
+
+    @property
+    def dedupe_key(self) -> str:
+        return f"{self.fixture_id}:{self.elapsed}:{self.team_name}:{self.event_type}:{self.player_name}"
+
+
+@dataclass(frozen=True)
 class StandingsEntry:
     rank: int
     team_name: str

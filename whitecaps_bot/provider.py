@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from whitecaps_bot.apifootball import ApiFootballClient, CardEvent, MatchState, StandingsEntry, SubstitutionEvent
+from whitecaps_bot.apifootball import ApiFootballClient, CardEvent, KeyEvent, MatchState, StandingsEntry, SubstitutionEvent
 from whitecaps_bot.espn import EspnClient
 
 logger = logging.getLogger("whitecaps_bot.provider")
@@ -33,6 +33,14 @@ class ScoreProvider:
 
     async def get_standings(self) -> list[StandingsEntry]:
         return await self.espn.get_standings()
+
+    async def get_key_events(self, fixture_id: int) -> list[KeyEvent]:
+        if self._last_espn_event_id:
+            try:
+                return await self.espn.get_key_events(self._last_espn_event_id, fixture_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("ESPN key events fetch failed")
+        return []
 
     async def get_cards(self, fixture_id: int) -> list[CardEvent]:
         if self._last_espn_event_id:
