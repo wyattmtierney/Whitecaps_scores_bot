@@ -65,6 +65,7 @@ class WhitecapsBot(commands.Bot):
             try:
                 matches = await with_retry(lambda: self.api.get_upcoming_fixtures())
             except RuntimeError:
+                logger.exception("Failed to fetch upcoming fixtures")
                 await ctx.send("Could not fetch upcoming matches. Try again later.")
                 return
             if not matches:
@@ -78,6 +79,7 @@ class WhitecapsBot(commands.Bot):
             try:
                 entries = await with_retry(lambda: self.api.get_standings())
             except RuntimeError:
+                logger.exception("Failed to fetch MLS standings")
                 await ctx.send("Could not fetch MLS standings. Try again later.")
                 return
             if not entries:
@@ -125,14 +127,7 @@ class WhitecapsBot(commands.Bot):
         fixture_changed = self.tracker.current_fixture_id != match.fixture_id
 
         if fixture_changed:
-            self.tracker.current_fixture_id = match.fixture_id
-            self.tracker.last_score = None
-            self.tracker.posted_sub_keys.clear()
-            self.tracker.posted_card_keys.clear()
-            self.tracker.posted_event_keys.clear()
-            self.tracker.halftime_posted = False
-            self.tracker.fulltime_posted = False
-            self.tracker.match_thread_id = None
+            self.tracker.reset_for_new_fixture(match.fixture_id)
 
         # Only create a thread if the tracker approves (prevents duplicates,
         # far-future threads, and wrong-opponent threads).

@@ -279,3 +279,28 @@ def test_tracker_halftime_fulltime_flags():
     tracker.fulltime_posted = True
     assert tracker.halftime_posted is True
     assert tracker.fulltime_posted is True
+
+
+def test_reset_for_new_fixture_clears_all_state():
+    tracker = MatchTracker()
+    tracker.current_fixture_id = 99
+    tracker.last_score = (1, 0)
+    tracker.posted_sub_keys.add("sub1")
+    tracker.posted_card_keys.add("card1")
+    tracker.posted_event_keys.add("event1")
+    tracker.halftime_posted = True
+    tracker.fulltime_posted = True
+    tracker.match_thread_id = 12345
+
+    tracker.reset_for_new_fixture(200)
+
+    assert tracker.current_fixture_id == 200
+    assert tracker.last_score is None
+    assert len(tracker.posted_sub_keys) == 0
+    assert len(tracker.posted_card_keys) == 0
+    assert len(tracker.posted_event_keys) == 0
+    assert tracker.halftime_posted is False
+    assert tracker.fulltime_posted is False
+    assert tracker.match_thread_id is None
+    # _threads_created_for must survive reset (prevents duplicate thread creation)
+    assert 99 not in tracker._threads_created_for
