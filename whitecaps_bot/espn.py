@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
@@ -137,9 +138,8 @@ class EspnClient:
         # ESPN doesn't include Canadian broadcasts — inject TSN from
         # the published TSN schedule when the match date matches.
         if starts_at and "TSN" not in _seen:
-            from zoneinfo import ZoneInfo
             local = starts_at.astimezone(ZoneInfo("America/Vancouver"))
-            if (local.month, local.day) in _TSN_SCHEDULE_2026:
+            if local.year == 2026 and (local.month, local.day) in _TSN_SCHEDULE_2026:
                 broadcasts.append("TSN \U0001f1e8\U0001f1e6")
                 _seen.add("TSN")
 

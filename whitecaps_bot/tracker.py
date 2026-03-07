@@ -454,6 +454,17 @@ class MatchTracker:
         embed.timestamp = datetime.now(timezone.utc)
         return embed
 
+    def reset_for_new_fixture(self, fixture_id: int) -> None:
+        """Atomically reset all per-match tracking state for a new fixture."""
+        self.current_fixture_id = fixture_id
+        self.last_score = None
+        self.posted_sub_keys.clear()
+        self.posted_card_keys.clear()
+        self.posted_event_keys.clear()
+        self.halftime_posted = False
+        self.fulltime_posted = False
+        self.match_thread_id = None
+
     def should_create_thread(self, match: MatchState) -> bool:
         """Check if we should create a thread for this match right now."""
         if match.fixture_id in self._threads_created_for:
@@ -507,6 +518,13 @@ class MatchTracker:
 
         if forum_channel_id:
             forum_channel = bot.get_channel(forum_channel_id)
+            if forum_channel is None:
+                logger.warning("FORUM_CHANNEL_ID %s not found; falling back to text channel.", forum_channel_id)
+            elif not isinstance(forum_channel, discord.ForumChannel):
+                logger.warning(
+                    "Channel %s is %s, not a ForumChannel; falling back to text channel.",
+                    forum_channel_id, type(forum_channel).__name__,
+                )
             if isinstance(forum_channel, discord.ForumChannel):
                 # Check for an existing thread before creating a new one
                 existing = await self._find_existing_thread(forum_channel, title)
