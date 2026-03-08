@@ -40,6 +40,64 @@ def _athlete_name(value: Any, default: str) -> str:
     return default
 
 
+def _participant_name(participant: Any) -> str:
+    """Extract displayName/shortName from a single participants[] entry."""
+    if not isinstance(participant, dict):
+        return ""
+    athlete = participant.get("athlete") or {}
+    return athlete.get("displayName") or athlete.get("shortName") or ""
+
+
+def _sub_players(play: dict) -> tuple[str, str]:
+    """Return (player_in, player_out) for a substitution play.
+
+    ESPN puts substitution participants in order [player_out, player_in], but
+    also includes a ``type.text`` field ("Off" / "On") that we use when present.
+    Falls back to positional ordering if type information is absent.
+    """
+    participants = play.get("participants") or []
+    player_in = ""
+    player_out = ""
+
+    for p in participants:
+        name = _participant_name(p)
+        if not name:
+            continue
+        type_text = (((p.get("type") or {}).get("text")) or "").lower()
+        if type_text in ("on", "in", "substitution in"):
+            player_in = name
+        elif type_text in ("off", "out", "substitution out"):
+            player_out = name
+
+    # Positional fallback: ESPN sends [off_player, on_player]
+    if not player_in and not player_out and len(participants) >= 2:
+        player_out = _participant_name(participants[0]) or "Unknown"
+        player_in = _participant_name(participants[1]) or "Unknown"
+    elif not player_in and not player_out and len(participants) == 1:
+        player_in = _participant_name(participants[0]) or "Unknown"
+
+    return player_in or "Unknown", player_out or "Unknown"
+
+
+def _clock_elapsed(clock: dict) -> int | None:
+    """Convert an ESPN clock dict to an integer match minute.
+
+    ESPN's ``clock.value`` is total elapsed seconds.  ``clock.displayValue``
+    is a human-readable string like ``"54:32"`` — we prefer that when available
+    since it avoids a division and already encodes the correct minute.
+    """
+    display = (clock.get("displayValue") or "").strip()
+    if display:
+        # displayValue format is "MM:SS" — take the minutes portion.
+        minute_part = display.split(":")[0]
+        if minute_part.isdigit():
+            return int(minute_part)
+    value = clock.get("value")
+    if isinstance(value, (int, float)) and value > 0:
+        return int(value) // 60
+    return None
+
+
 @dataclass(frozen=True)
 class EspnFixtureRef:
     event_id: str
@@ -263,13 +321,11 @@ class EspnClient:
                 continue
 
             team = ((play.get("team") or {}).get("displayName")) or "Unknown"
-            minute = play.get("clock", {}).get("value")
-            elapsed = int(minute) if isinstance(minute, (int, float)) else None
+            elapsed = _clock_elapsed(play.get("clock") or {})
             text = play.get("text") or ""
 
             if event_type == "substitution":
-                player_name = _athlete_name(play.get("athletesIn"), "Unknown")
-                detail = _athlete_name(play.get("athletesOut"), "Unknown")
+                player_name, detail = _sub_players(play)
             elif event_type in ("goal", "penalty_goal", "own_goal"):
                 player_name, detail = self._extract_goal_info(play)
             elif event_type in ("yellow_card", "red_card"):
@@ -394,14 +450,15 @@ class EspnClient:
             if "substitution" not in text:
                 continue
             team = ((play.get("team") or {}).get("displayName")) or "Unknown team"
-            minute = play.get("clock", {}).get("value")
+            elapsed = _clock_elapsed(play.get("clock") or {})
+            player_in, player_out = _sub_players(play)
             substitutions.append(
                 SubstitutionEvent(
                     fixture_id=fixture_id,
-                    elapsed=int(minute) if isinstance(minute, (int, float)) else None,
+                    elapsed=elapsed,
                     team_name=team,
-                    player_in=_athlete_name(play.get("athletesIn"), "Unknown in"),
-                    player_out=_athlete_name(play.get("athletesOut"), "Unknown out"),
+                    player_in=player_in,
+                    player_out=player_out,
                 )
             )
 
@@ -424,12 +481,12 @@ class EspnClient:
                 continue
 
             team = ((play.get("team") or {}).get("displayName")) or "Unknown team"
-            minute = play.get("clock", {}).get("value")
+            elapsed = _clock_elapsed(play.get("clock") or {})
             player = self._extract_player(play)
 
             cards.append(CardEvent(
                 fixture_id=fixture_id,
-                elapsed=int(minute) if isinstance(minute, (int, float)) else None,
+                elapsed=elapsed,
                 team_name=team,
                 player_name=player,
                 card_type=card_type,
