@@ -1,4 +1,4 @@
-from whitecaps_bot.espn import EspnClient
+from whitecaps_bot.espn import EspnClient, _clock_elapsed, _sub_players
 
 
 def test_classify_play_goal():
@@ -76,3 +76,57 @@ def test_extract_goal_info_penalty_no_assist():
     scorer, assist = EspnClient._extract_goal_info(play)
     assert scorer == "Ryan Gauld"
     assert assist == ""
+
+
+# --- _clock_elapsed tests ---
+
+def test_clock_elapsed_from_display_value():
+    # displayValue "54:32" → minute 54
+    assert _clock_elapsed({"displayValue": "54:32", "value": 9999}) == 54
+
+
+def test_clock_elapsed_from_value_seconds():
+    # No displayValue → fall back to value // 60
+    assert _clock_elapsed({"value": 3229}) == 53   # 3229 // 60
+
+
+def test_clock_elapsed_value_zero():
+    assert _clock_elapsed({"value": 0}) is None
+
+
+def test_clock_elapsed_empty():
+    assert _clock_elapsed({}) is None
+
+
+# --- _sub_players tests ---
+
+def test_sub_players_type_based():
+    play = {
+        "participants": [
+            {"athlete": {"displayName": "Player Off"}, "type": {"text": "Off"}},
+            {"athlete": {"displayName": "Player On"}, "type": {"text": "On"}},
+        ]
+    }
+    player_in, player_out = _sub_players(play)
+    assert player_in == "Player On"
+    assert player_out == "Player Off"
+
+
+def test_sub_players_positional_fallback():
+    # No type field → ESPN order is [off, on]
+    play = {
+        "participants": [
+            {"athlete": {"displayName": "Going Off"}},
+            {"athlete": {"displayName": "Coming On"}},
+        ]
+    }
+    player_in, player_out = _sub_players(play)
+    assert player_in == "Coming On"
+    assert player_out == "Going Off"
+
+
+def test_sub_players_no_participants():
+    play = {"participants": []}
+    player_in, player_out = _sub_players(play)
+    assert player_in == "Unknown"
+    assert player_out == "Unknown"
