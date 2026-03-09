@@ -20,9 +20,9 @@ _CANADIAN_NETWORKS = frozenset({"TSN", "TSN1", "TSN2", "TSN3", "TSN4", "TSN5", "
 # US networks that are not available in Canada → replaced with Canadian equivalents.
 # MLS matches on FS2/TUDN are simulcast on OneSoccer and available via FuboTV Canada.
 _CA_BROADCAST_REPLACEMENTS: dict[str, str] = {
-    "FS2": "OneSoccer / FuboTV 🇨🇦",
-    "TUDN": "OneSoccer / FuboTV 🇨🇦",
-    "FOX DEPORTES": "OneSoccer / FuboTV 🇨🇦",
+    "FS2": "OneSoccer / FuboTV",
+    "TUDN": "OneSoccer / FuboTV",
+    "FOX DEPORTES": "OneSoccer / FuboTV",
 }
 
 # 2026 Whitecaps matches broadcast on TSN (month, day).
