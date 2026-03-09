@@ -17,6 +17,14 @@ ESPN_STANDINGS_URL = "https://site.api.espn.com/apis/v2/sports/soccer/usa.1/stan
 
 _CANADIAN_NETWORKS = frozenset({"TSN", "TSN1", "TSN2", "TSN3", "TSN4", "TSN5", "TSN+", "RDS", "RDS2", "CTV"})
 
+# US networks that are not available in Canada → replaced with Canadian equivalents.
+# MLS matches on FS2/TUDN are simulcast on OneSoccer and available via FuboTV Canada.
+_CA_BROADCAST_REPLACEMENTS: dict[str, str] = {
+    "FS2": "OneSoccer / FuboTV 🇨🇦",
+    "TUDN": "OneSoccer / FuboTV 🇨🇦",
+    "FOX DEPORTES": "OneSoccer / FuboTV 🇨🇦",
+}
+
 # 2026 Whitecaps matches broadcast on TSN (month, day).
 # Source: TSN published schedule.  Update each season.
 _TSN_SCHEDULE_2026 = frozenset({
@@ -169,6 +177,15 @@ class EspnClient:
             if upper in _seen:
                 return
             _seen.add(upper)
+            # Swap US-only networks for Canadian equivalents.
+            replacement = _CA_BROADCAST_REPLACEMENTS.get(upper)
+            if replacement:
+                # Use the replacement key so a duplicate FS2+TUDN entry only appears once.
+                replacement_key = replacement.upper()
+                if replacement_key not in _seen:
+                    _seen.add(replacement_key)
+                    broadcasts.append(replacement)
+                return
             if is_canadian or upper in _CANADIAN_NETWORKS:
                 broadcasts.append(f"{name} \U0001f1e8\U0001f1e6")
             else:
