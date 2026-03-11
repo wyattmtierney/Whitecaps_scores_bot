@@ -129,9 +129,9 @@ class WhitecapsBot(commands.Bot):
         if fixture_changed:
             self.tracker.reset_for_new_fixture(match.fixture_id)
 
-        # Only create a thread if the tracker approves (prevents duplicates,
-        # far-future threads, and wrong-opponent threads).
-        if fixture_changed and self.tracker.should_create_thread(match):
+        # Create a match thread when the kickoff window opens.
+        # should_create_thread() handles deduplication via _threads_created_for.
+        if self.tracker.should_create_thread(match):
             destination = await self.tracker.ensure_match_thread(
                 self,
                 match,

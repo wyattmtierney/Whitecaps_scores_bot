@@ -57,6 +57,27 @@ def test_should_create_thread_blocks_far_future():
     assert tracker.should_create_thread(match) is False
 
 
+def test_should_create_thread_triggers_when_window_opens():
+    """Regression: thread must be created when match enters the 36h window,
+    even if the same fixture was previously seen outside the window (i.e.
+    fixture_changed is False in bot.py).  should_create_thread() must be
+    evaluated every poll cycle, not only when the fixture first changes."""
+    tracker = MatchTracker()
+    # Simulate: bot first saw this fixture 48 h before kickoff — too early.
+    match_far = _make_match(starts_at=datetime.now(timezone.utc) + timedelta(hours=48))
+    assert tracker.should_create_thread(match_far) is False
+    # Manually advance to mimic fixture_id being tracked without a thread created.
+    tracker.current_fixture_id = match_far.fixture_id
+
+    # Now the same fixture is 10 hours from kickoff — inside the window.
+    match_near = _make_match(
+        fixture_id=match_far.fixture_id,
+        starts_at=datetime.now(timezone.utc) + timedelta(hours=10),
+    )
+    # Must return True without needing fixture_changed or a bot restart.
+    assert tracker.should_create_thread(match_near) is True
+
+
 def test_should_create_thread_allows_near_kickoff():
     tracker = MatchTracker()
     match = _make_match(
