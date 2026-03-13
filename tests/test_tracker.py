@@ -57,6 +57,27 @@ def test_should_create_thread_blocks_far_future():
     assert tracker.should_create_thread(match) is False
 
 
+def test_should_create_thread_triggers_when_window_opens():
+    """Regression: thread must be created when match enters the 36h window,
+    even if the same fixture was previously seen outside the window (i.e.
+    fixture_changed is False in bot.py).  should_create_thread() must be
+    evaluated every poll cycle, not only when the fixture first changes."""
+    tracker = MatchTracker()
+    # Simulate: bot first saw this fixture 48 h before kickoff — too early.
+    match_far = _make_match(starts_at=datetime.now(timezone.utc) + timedelta(hours=48))
+    assert tracker.should_create_thread(match_far) is False
+    # Manually advance to mimic fixture_id being tracked without a thread created.
+    tracker.current_fixture_id = match_far.fixture_id
+
+    # Now the same fixture is 10 hours from kickoff — inside the window.
+    match_near = _make_match(
+        fixture_id=match_far.fixture_id,
+        starts_at=datetime.now(timezone.utc) + timedelta(hours=10),
+    )
+    # Must return True without needing fixture_changed or a bot restart.
+    assert tracker.should_create_thread(match_near) is True
+
+
 def test_should_create_thread_allows_near_kickoff():
     tracker = MatchTracker()
     match = _make_match(
@@ -279,3 +300,28 @@ def test_tracker_halftime_fulltime_flags():
     tracker.fulltime_posted = True
     assert tracker.halftime_posted is True
     assert tracker.fulltime_posted is True
+
+
+def test_reset_for_new_fixture_clears_all_state():
+    tracker = MatchTracker()
+    tracker.current_fixture_id = 99
+    tracker.last_score = (1, 0)
+    tracker.posted_sub_keys.add("sub1")
+    tracker.posted_card_keys.add("card1")
+    tracker.posted_event_keys.add("event1")
+    tracker.halftime_posted = True
+    tracker.fulltime_posted = True
+    tracker.match_thread_id = 12345
+
+    tracker.reset_for_new_fixture(200)
+
+    assert tracker.current_fixture_id == 200
+    assert tracker.last_score is None
+    assert len(tracker.posted_sub_keys) == 0
+    assert len(tracker.posted_card_keys) == 0
+    assert len(tracker.posted_event_keys) == 0
+    assert tracker.halftime_posted is False
+    assert tracker.fulltime_posted is False
+    assert tracker.match_thread_id is None
+    # _threads_created_for must survive reset (prevents duplicate thread creation)
+    assert 99 not in tracker._threads_created_for
