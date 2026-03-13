@@ -170,6 +170,9 @@ class WhitecapsBot(commands.Bot):
         prev_score = self.tracker.last_score
         score_changed = match.state == "in" and score != prev_score
         is_kickoff = prev_score is None and score == (0, 0)
+        total = (score[0] or 0) + (score[1] or 0)
+        prev_total = ((prev_score[0] or 0) + (prev_score[1] or 0)) if prev_score else 0
+        score_increased = score_changed and total > prev_total
 
         if score_changed:
             self.tracker.last_score = score
@@ -183,6 +186,10 @@ class WhitecapsBot(commands.Bot):
                 events = await with_retry(lambda: self.api.get_key_events(match.fixture_id))
                 for event in events:
                     if event.dedupe_key in self.tracker.posted_event_keys:
+                        # Already posted — but still counts as "covered" for
+                        # the fallback check so we don't double-post.
+                        if event.event_type in ("goal", "penalty_goal", "own_goal"):
+                            goal_from_events = True
                         continue
                     self.tracker.posted_event_keys.add(event.dedupe_key)
                     if event.event_type in ("goal", "penalty_goal", "own_goal"):
@@ -191,9 +198,9 @@ class WhitecapsBot(commands.Bot):
             except RuntimeError:
                 logger.warning("Key events fetch failed for fixture %s", match.fixture_id)
 
-        # Fallback: score went up but key events didn't report a goal —
+        # Fallback: score increased but key events didn't report a goal —
         # post a generic GOOOAL so goals are never silently missed.
-        if score_changed and not is_kickoff and not goal_from_events:
+        if score_increased and not goal_from_events:
             await destination.send(embed=self.tracker.build_score_embed(match))
 
         # Half-time alert
