@@ -127,6 +127,11 @@ class WhitecapsBot(commands.Bot):
         fixture_changed = self.tracker.current_fixture_id != match.fixture_id
 
         if fixture_changed:
+            logger.info(
+                "Fixture changed: %s → %s (%s vs %s, state=%s)",
+                self.tracker.current_fixture_id, match.fixture_id,
+                match.home_name, match.away_name, match.state,
+            )
             self.tracker.reset_for_new_fixture(match.fixture_id)
 
         # Create a match thread when the kickoff window opens.
@@ -145,27 +150,58 @@ class WhitecapsBot(commands.Bot):
 
         destination = self.get_channel(self.tracker.match_thread_id)
         if destination is None:
-            return
+            # Cache miss — the thread was likely created hours ago and evicted
+            # from Discord.py's internal cache.  Fall back to an API fetch.
+            try:
+                destination = await self.fetch_channel(self.tracker.match_thread_id)
+                logger.info(
+                    "Thread %s recovered via fetch_channel (was missing from cache)",
+                    self.tracker.match_thread_id,
+                )
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                logger.warning(
+                    "Match thread %s is unreachable; skipping update",
+                    self.tracker.match_thread_id,
+                )
+                return
 
-        # Kickoff detection via score tracking
+        # Track score changes
         score = (match.home_goals, match.away_goals)
-        if match.state == "in" and score != self.tracker.last_score:
-            is_kickoff = self.tracker.last_score is None and score == (0, 0)
+        prev_score = self.tracker.last_score
+        score_changed = match.state == "in" and score != prev_score
+        is_kickoff = prev_score is None and score == (0, 0)
+        total = (score[0] or 0) + (score[1] or 0)
+        prev_total = ((prev_score[0] or 0) + (prev_score[1] or 0)) if prev_score else 0
+        score_increased = score_changed and total > prev_total
+
+        if score_changed:
             self.tracker.last_score = score
             if is_kickoff:
                 await destination.send(embed=self.tracker.build_kickoff_embed(match))
 
         # Key events — goals, cards, subs, penalties, VAR, etc.
+        goal_from_events = False
         if match.state == "in":
             try:
                 events = await with_retry(lambda: self.api.get_key_events(match.fixture_id))
                 for event in events:
                     if event.dedupe_key in self.tracker.posted_event_keys:
+                        # Already posted — but still counts as "covered" for
+                        # the fallback check so we don't double-post.
+                        if event.event_type in ("goal", "penalty_goal", "own_goal"):
+                            goal_from_events = True
                         continue
                     self.tracker.posted_event_keys.add(event.dedupe_key)
+                    if event.event_type in ("goal", "penalty_goal", "own_goal"):
+                        goal_from_events = True
                     await destination.send(embed=self.tracker.build_key_event_embed(event, match))
             except RuntimeError:
                 logger.warning("Key events fetch failed for fixture %s", match.fixture_id)
+
+        # Fallback: score increased but key events didn't report a goal —
+        # post a generic GOOOAL so goals are never silently missed.
+        if score_increased and not goal_from_events:
+            await destination.send(embed=self.tracker.build_score_embed(match))
 
         # Half-time alert
         if match.is_halftime and not self.tracker.halftime_posted:
