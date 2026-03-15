@@ -537,6 +537,7 @@ class MatchTracker:
                 created = await forum_channel.create_thread(
                     name=title,
                     embed=embed,
+                    auto_archive_duration=10080,  # 7 days — prevents archiving before/during match
                 )
                 thread = getattr(created, "thread", None) or created
                 self.match_thread_id = thread.id
