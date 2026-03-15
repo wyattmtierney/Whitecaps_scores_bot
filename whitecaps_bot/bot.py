@@ -165,6 +165,18 @@ class WhitecapsBot(commands.Bot):
                 )
                 return
 
+        # If the thread was auto-archived (e.g. created far before kickoff),
+        # unarchive it now so subsequent sends don't require MANAGE_THREADS.
+        if isinstance(destination, discord.Thread) and destination.archived:
+            try:
+                await destination.edit(archived=False)
+                logger.info("Unarchived match thread %s", self.tracker.match_thread_id)
+            except discord.HTTPException:
+                logger.warning(
+                    "Could not unarchive thread %s; posts may fail",
+                    self.tracker.match_thread_id,
+                )
+
         # Track score changes
         score = (match.home_goals, match.away_goals)
         prev_score = self.tracker.last_score
