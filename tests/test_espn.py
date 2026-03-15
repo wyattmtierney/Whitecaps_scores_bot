@@ -113,11 +113,11 @@ def test_sub_players_type_based():
 
 
 def test_sub_players_positional_fallback():
-    # No type field → ESPN order is [off, on]
+    # No type field → ESPN keyEvents order is [on, off]
     play = {
         "participants": [
-            {"athlete": {"displayName": "Going Off"}},
             {"athlete": {"displayName": "Coming On"}},
+            {"athlete": {"displayName": "Going Off"}},
         ]
     }
     player_in, player_out = _sub_players(play)

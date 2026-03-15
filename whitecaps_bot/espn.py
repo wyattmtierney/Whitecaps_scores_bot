@@ -59,9 +59,9 @@ def _participant_name(participant: Any) -> str:
 def _sub_players(play: dict) -> tuple[str, str]:
     """Return (player_in, player_out) for a substitution play.
 
-    ESPN puts substitution participants in order [player_out, player_in], but
-    also includes a ``type.text`` field ("Off" / "On") that we use when present.
-    Falls back to positional ordering if type information is absent.
+    ESPN's keyEvents participants are ordered [player_in, player_out] — the
+    player coming ON is listed first.  A ``type.text`` field ("Off" / "On") is
+    used when present to override positional ordering.
     """
     participants = play.get("participants") or []
     player_in = ""
@@ -77,10 +77,10 @@ def _sub_players(play: dict) -> tuple[str, str]:
         elif type_text in ("off", "out", "substitution out"):
             player_out = name
 
-    # Positional fallback: ESPN sends [off_player, on_player]
+    # Positional fallback: ESPN keyEvents sends [on_player, off_player]
     if not player_in and not player_out and len(participants) >= 2:
-        player_out = _participant_name(participants[0]) or "Unknown"
-        player_in = _participant_name(participants[1]) or "Unknown"
+        player_in = _participant_name(participants[0]) or "Unknown"
+        player_out = _participant_name(participants[1]) or "Unknown"
     elif not player_in and not player_out and len(participants) == 1:
         player_in = _participant_name(participants[0]) or "Unknown"
 
