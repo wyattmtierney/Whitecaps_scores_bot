@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands
@@ -220,15 +219,6 @@ class WhitecapsBot(commands.Bot):
         # post a generic GOOOAL so goals are never silently missed.
         if score_increased and not goal_from_events:
             await destination.send(embed=self.tracker.build_score_embed(match))
-
-        # Periodic score update every 15 minutes during live play so users
-        # see the bot is alive even in a scoreless match.
-        if match.state == "in" and not match.is_halftime:
-            now = datetime.now(timezone.utc)
-            last_post = self.tracker.last_score_post_time
-            if last_post is None or (now - last_post) >= timedelta(minutes=15):
-                self.tracker.last_score_post_time = now
-                await destination.send(embed=self.tracker.build_score_embed(match))
 
         # Half-time alert
         if match.is_halftime and not self.tracker.halftime_posted:
