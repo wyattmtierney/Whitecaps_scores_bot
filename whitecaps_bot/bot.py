@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands
@@ -177,19 +178,24 @@ class WhitecapsBot(commands.Bot):
                     self.tracker.match_thread_id,
                 )
 
-        # Track score changes
+        # Track score changes and state transitions
         score = (match.home_goals, match.away_goals)
         prev_score = self.tracker.last_score
+        prev_state = self.tracker.last_state
         score_changed = match.state == "in" and score != prev_score
-        is_kickoff = prev_score is None and score == (0, 0)
+        # Kickoff: state transitioned to "in" (regardless of score value from API)
+        is_kickoff = match.state == "in" and prev_state != "in"
         total = (score[0] or 0) + (score[1] or 0)
         prev_total = ((prev_score[0] or 0) + (prev_score[1] or 0)) if prev_score else 0
         score_increased = score_changed and total > prev_total
 
+        self.tracker.last_state = match.state
+
         if score_changed:
             self.tracker.last_score = score
-            if is_kickoff:
-                await destination.send(embed=self.tracker.build_kickoff_embed(match))
+
+        if is_kickoff:
+            await destination.send(embed=self.tracker.build_kickoff_embed(match))
 
         # Key events — goals, cards, subs, penalties, VAR, etc.
         goal_from_events = False
@@ -214,6 +220,15 @@ class WhitecapsBot(commands.Bot):
         # post a generic GOOOAL so goals are never silently missed.
         if score_increased and not goal_from_events:
             await destination.send(embed=self.tracker.build_score_embed(match))
+
+        # Periodic score update every 15 minutes during live play so users
+        # see the bot is alive even in a scoreless match.
+        if match.state == "in" and not match.is_halftime:
+            now = datetime.now(timezone.utc)
+            last_post = self.tracker.last_score_post_time
+            if last_post is None or (now - last_post) >= timedelta(minutes=15):
+                self.tracker.last_score_post_time = now
+                await destination.send(embed=self.tracker.build_score_embed(match))
 
         # Half-time alert
         if match.is_halftime and not self.tracker.halftime_posted:

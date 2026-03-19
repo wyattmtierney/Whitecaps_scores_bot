@@ -75,6 +75,8 @@ class MatchTracker:
         self.current_fixture_id: int | None = None
         self.match_thread_id: int | None = None
         self.last_score: tuple[int | None, int | None] | None = None
+        self.last_state: str | None = None
+        self.last_score_post_time: datetime | None = None
         self.posted_sub_keys: set[str] = set()
         self.posted_card_keys: set[str] = set()
         self.posted_event_keys: set[str] = set()
@@ -458,6 +460,8 @@ class MatchTracker:
         """Atomically reset all per-match tracking state for a new fixture."""
         self.current_fixture_id = fixture_id
         self.last_score = None
+        self.last_state = None
+        self.last_score_post_time = None
         self.posted_sub_keys.clear()
         self.posted_card_keys.clear()
         self.posted_event_keys.clear()
