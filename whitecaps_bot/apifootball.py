@@ -113,12 +113,14 @@ class ApiFootballClient:
             "x-apisports-key": api_key,
         }
         self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+        self._session: aiohttp.ClientSession | None = None
 
     async def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
-        async with aiohttp.ClientSession(timeout=self._timeout, headers=self._headers) as session:
-            async with session.get(f"{BASE_URL}{path}", params=params) as response:
-                response.raise_for_status()
-                return await response.json()
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(timeout=self._timeout, headers=self._headers)
+        async with self._session.get(f"{BASE_URL}{path}", params=params) as response:
+            response.raise_for_status()
+            return await response.json()
 
     @staticmethod
     def _to_match_state(item: dict[str, Any]) -> MatchState:

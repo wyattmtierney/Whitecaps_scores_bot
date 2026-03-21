@@ -5,7 +5,7 @@ import logging
 
 import aiohttp
 
-from whitecaps_bot.apifootball import ApiFootballClient, CardEvent, KeyEvent, MatchState, StandingsEntry, SubstitutionEvent
+from whitecaps_bot.apifootball import ApiFootballClient, KeyEvent, MatchState, StandingsEntry
 from whitecaps_bot.espn import EspnClient
 
 _NETWORK_ERRORS = (aiohttp.ClientError, asyncio.TimeoutError, OSError, ValueError)
@@ -47,22 +47,3 @@ class ScoreProvider:
                 logger.exception("ESPN key events fetch failed")
         return []
 
-    async def get_cards(self, fixture_id: int) -> list[CardEvent]:
-        if self._last_espn_event_id:
-            try:
-                return await self.espn.get_cards(self._last_espn_event_id, fixture_id)
-            except _NETWORK_ERRORS:
-                logger.exception("ESPN cards fetch failed")
-        return []
-
-    async def get_substitutions(self, fixture_id: int) -> list[SubstitutionEvent]:
-        if self._last_espn_event_id:
-            try:
-                return await self.espn.get_substitutions(self._last_espn_event_id, fixture_id)
-            except _NETWORK_ERRORS:
-                logger.exception("ESPN substitutions fetch failed; trying API-Football fallback")
-
-        if self.api_football is None:
-            return []
-
-        return await self.api_football.get_substitutions(fixture_id)

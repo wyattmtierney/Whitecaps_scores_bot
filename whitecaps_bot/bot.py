@@ -136,8 +136,8 @@ class WhitecapsBot(commands.Bot):
             self.tracker.reset_for_new_fixture(match.fixture_id)
 
         # Create a match thread when the kickoff window opens.
-        # should_create_thread() handles deduplication via _threads_created_for.
-        if self.tracker.should_create_thread(match):
+        # Skip the check entirely once a thread is already established for this fixture.
+        if self.tracker.match_thread_id is None and self.tracker.should_create_thread(match):
             destination = await self.tracker.ensure_match_thread(
                 self,
                 match,
