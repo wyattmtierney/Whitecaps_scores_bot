@@ -286,10 +286,11 @@ def test_tracker_event_keys_tracking():
 
 
 def test_tracker_card_keys_tracking():
+    # posted_card_keys and posted_sub_keys were removed; events are unified in posted_event_keys
     tracker = MatchTracker()
-    assert len(tracker.posted_card_keys) == 0
-    tracker.posted_card_keys.add("test_key")
-    assert "test_key" in tracker.posted_card_keys
+    assert len(tracker.posted_event_keys) == 0
+    tracker.posted_event_keys.add("test_key")
+    assert "test_key" in tracker.posted_event_keys
 
 
 def test_tracker_halftime_fulltime_flags():
@@ -306,8 +307,6 @@ def test_reset_for_new_fixture_clears_all_state():
     tracker = MatchTracker()
     tracker.current_fixture_id = 99
     tracker.last_score = (1, 0)
-    tracker.posted_sub_keys.add("sub1")
-    tracker.posted_card_keys.add("card1")
     tracker.posted_event_keys.add("event1")
     tracker.halftime_posted = True
     tracker.fulltime_posted = True
@@ -317,8 +316,6 @@ def test_reset_for_new_fixture_clears_all_state():
 
     assert tracker.current_fixture_id == 200
     assert tracker.last_score is None
-    assert len(tracker.posted_sub_keys) == 0
-    assert len(tracker.posted_card_keys) == 0
     assert len(tracker.posted_event_keys) == 0
     assert tracker.halftime_posted is False
     assert tracker.fulltime_posted is False

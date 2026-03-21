@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 
-from whitecaps_bot.apifootball import CardEvent, KeyEvent, MatchState, StandingsEntry, SubstitutionEvent
+from whitecaps_bot.apifootball import KeyEvent, MatchState, StandingsEntry
 
 
 ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard"
@@ -117,12 +117,14 @@ class EspnClient:
         self.team_id = str(team_id)
         self.team_name = team_name.lower()
         self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+        self._session: aiohttp.ClientSession | None = None
 
     async def _get(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
-        async with aiohttp.ClientSession(timeout=self._timeout) as session:
-            async with session.get(url, params=params) as response:
-                response.raise_for_status()
-                return await response.json()
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(timeout=self._timeout)
+        async with self._session.get(url, params=params) as response:
+            response.raise_for_status()
+            return await response.json()
 
     def _is_target_team(self, home: dict[str, Any], away: dict[str, Any], home_name: str, away_name: str) -> bool:
         home_id = str((home.get("team") or {}).get("id") or "")
@@ -369,26 +371,27 @@ class EspnClient:
         """Classify an ESPN play into a key event type, or None to skip."""
         play_type = ((play.get("type") or {}).get("text") or "").lower()
         text = (play.get("text") or "").lower()
-        combined = f"{play_type} {text}"
 
         # VAR / video review — check before goals since VAR text often contains "goal"
-        if "var" in combined or "video review" in combined:
+        if "var" in play_type or "var" in text or "video review" in play_type or "video review" in text:
             return "var"
-        if "no goal" in combined:
+        if "no goal" in play_type or "no goal" in text:
             return None
-        if "own goal" in combined:
+        if "own goal" in play_type or "own goal" in text:
             return "own_goal"
-        if "penalty" in combined and ("miss" in combined or "saved" in combined):
-            return "penalty_miss"
-        if "penalty" in combined and ("goal" in combined or "scored" in combined):
-            return "penalty_goal"
-        if "goal" in combined:
+        has_penalty = "penalty" in play_type or "penalty" in text
+        if has_penalty:
+            if "miss" in play_type or "miss" in text or "saved" in play_type or "saved" in text:
+                return "penalty_miss"
+            if "goal" in play_type or "goal" in text or "scored" in play_type or "scored" in text:
+                return "penalty_goal"
+        if "goal" in play_type or "goal" in text:
             return "goal"
-        if "red card" in combined:
+        if "red card" in play_type or "red card" in text:
             return "red_card"
-        if "yellow card" in combined or "booking" in combined:
+        if "yellow card" in play_type or "yellow card" in text or "booking" in play_type or "booking" in text:
             return "yellow_card"
-        if "substitution" in combined:
+        if "substitution" in play_type or "substitution" in text:
             return "substitution"
         return None
 
@@ -455,58 +458,3 @@ class EspnClient:
 
         return scorer or "Unknown", assist
 
-    # Legacy methods kept for API-Football fallback compatibility.
-
-    async def get_substitutions(self, event_id: str, fixture_id: int) -> list[SubstitutionEvent]:
-        payload = await self._get(ESPN_SUMMARY_URL, {"event": event_id})
-        plays = payload.get("plays", [])
-        substitutions: list[SubstitutionEvent] = []
-
-        for play in plays:
-            text = (play.get("text") or "").lower()
-            if "substitution" not in text:
-                continue
-            team = ((play.get("team") or {}).get("displayName")) or "Unknown team"
-            elapsed = _clock_elapsed(play.get("clock") or {})
-            player_in, player_out = _sub_players(play)
-            substitutions.append(
-                SubstitutionEvent(
-                    fixture_id=fixture_id,
-                    elapsed=elapsed,
-                    team_name=team,
-                    player_in=player_in,
-                    player_out=player_out,
-                )
-            )
-
-        return substitutions
-
-    async def get_cards(self, event_id: str, fixture_id: int) -> list[CardEvent]:
-        payload = await self._get(ESPN_SUMMARY_URL, {"event": event_id})
-        plays = payload.get("plays", [])
-        cards: list[CardEvent] = []
-
-        for play in plays:
-            text = (play.get("text") or "").lower()
-            card_type = None
-            if "red card" in text:
-                card_type = "Red Card"
-            elif "yellow card" in text or "booking" in text:
-                card_type = "Yellow Card"
-
-            if card_type is None:
-                continue
-
-            team = ((play.get("team") or {}).get("displayName")) or "Unknown team"
-            elapsed = _clock_elapsed(play.get("clock") or {})
-            player = self._extract_player(play)
-
-            cards.append(CardEvent(
-                fixture_id=fixture_id,
-                elapsed=elapsed,
-                team_name=team,
-                player_name=player,
-                card_type=card_type,
-            ))
-
-        return cards

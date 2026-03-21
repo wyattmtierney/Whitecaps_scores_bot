@@ -77,8 +77,6 @@ class MatchTracker:
         self.last_score: tuple[int | None, int | None] | None = None
         self.last_state: str | None = None
         self.last_score_post_time: datetime | None = None
-        self.posted_sub_keys: set[str] = set()
-        self.posted_card_keys: set[str] = set()
         self.posted_event_keys: set[str] = set()
         self.halftime_posted: bool = False
         self.fulltime_posted: bool = False
@@ -91,10 +89,7 @@ class MatchTracker:
             date_text = "TBD"
         else:
             local_date = match.starts_at.astimezone(PST)
-            month = local_date.strftime("%B")
-            day = str(local_date.day)
-            year = local_date.strftime("%Y")
-            date_text = f"{month} {day}, {year}"
+            date_text = local_date.strftime("%B %-d, %Y")
 
         if _is_whitecaps(match.home_name):
             return f"{match.away_name} @ Vancouver Whitecaps - {date_text}"
@@ -462,8 +457,6 @@ class MatchTracker:
         self.last_score = None
         self.last_state = None
         self.last_score_post_time = None
-        self.posted_sub_keys.clear()
-        self.posted_card_keys.clear()
         self.posted_event_keys.clear()
         self.halftime_posted = False
         self.fulltime_posted = False
