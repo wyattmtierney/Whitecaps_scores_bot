@@ -195,6 +195,7 @@ class WhitecapsBot(commands.Bot):
             self.tracker.last_score = score
 
         if is_kickoff:
+            self.tracker.last_score_post_time = datetime.now(timezone.utc)
             await destination.send(embed=self.tracker.build_kickoff_embed(match))
 
         # Key events — goals, cards, subs, penalties, VAR, etc.
@@ -219,6 +220,7 @@ class WhitecapsBot(commands.Bot):
         # Fallback: score increased but key events didn't report a goal —
         # post a generic GOOOAL so goals are never silently missed.
         if score_increased and not goal_from_events:
+            self.tracker.last_score_post_time = datetime.now(timezone.utc)
             await destination.send(embed=self.tracker.build_score_embed(match))
 
         # Periodic score update every 15 minutes during live play so users
