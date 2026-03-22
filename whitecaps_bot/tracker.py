@@ -264,6 +264,34 @@ class MatchTracker:
         return embed
 
     @staticmethod
+    def build_live_score_embed(match: MatchState) -> discord.Embed:
+        """Build a periodic live score update embed (not a goal announcement)."""
+        minute = f"{match.elapsed}'" if match.elapsed is not None else "-"
+
+        is_wc_home = _is_whitecaps(match.home_name)
+        wc_goals = match.home_goals if is_wc_home else match.away_goals
+        opp_goals = match.away_goals if is_wc_home else match.home_goals
+
+        if wc_goals is not None and opp_goals is not None:
+            color = WIN_GREEN if wc_goals > opp_goals else LOSS_RED if opp_goals > wc_goals else WHITECAPS_TEAL
+        else:
+            color = WHITECAPS_TEAL
+
+        embed = discord.Embed(
+            title="\U0001f4ca Live Score",
+            color=color,
+        )
+        embed.description = (
+            f"**{match.home_name}** `{match.home_goals}` \u2014 "
+            f"`{match.away_goals}` **{match.away_name}**"
+        )
+        embed.add_field(name="Minute", value=minute, inline=True)
+        embed.add_field(name="Status", value=match.long_status or match.short_status, inline=True)
+        embed.set_footer(text="\U0001f1e8\U0001f1e6 Vancouver Whitecaps FC \u2022 Data: ESPN")
+        embed.timestamp = datetime.now(timezone.utc)
+        return embed
+
+    @staticmethod
     def build_score_embed(match: MatchState) -> discord.Embed:
         """Build a prominent goal alert embed."""
         minute = f"{match.elapsed}'" if match.elapsed is not None else "-"

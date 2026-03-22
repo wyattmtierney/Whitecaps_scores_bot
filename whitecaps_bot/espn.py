@@ -389,6 +389,12 @@ class EspnClient:
             return "red_card"
         if "yellow card" in play_type or "yellow card" in text or "booking" in play_type or "booking" in text:
             return "yellow_card"
+        # Exclude plays that mention "goal" but are not scoring events.
+        # "Goal Kick" is extremely common and must be filtered before the
+        # general "goal" check; the fallback from keyEvents → plays exposes
+        # these to the classifier, especially in the opening minutes.
+        if "goal kick" in play_type or "goal kick" in text:
+            return None
         if "goal" in play_type or "goal" in text:
             return "goal"
         if "substitution" in play_type or "substitution" in text:
