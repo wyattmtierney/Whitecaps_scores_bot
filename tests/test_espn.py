@@ -26,10 +26,14 @@ def test_classify_play_penalty_miss():
 def test_classify_play_yellow_card():
     assert EspnClient._classify_play({"text": "Yellow Card - Ranko Veselinovic"}) == "yellow_card"
     assert EspnClient._classify_play({"text": "Booking - Someone"}) == "yellow_card"
+    # Card events whose text contains "goal" must not be misclassified as goals
+    assert EspnClient._classify_play({"text": "Yellow Card - goal saving tackle"}) == "yellow_card"
 
 
 def test_classify_play_red_card():
     assert EspnClient._classify_play({"text": "Red Card - Jordan Morris"}) == "red_card"
+    # Card events whose text contains "goal" must not be misclassified as goals
+    assert EspnClient._classify_play({"text": "Red Card - goal-line handball"}) == "red_card"
 
 
 def test_classify_play_substitution():

@@ -385,12 +385,12 @@ class EspnClient:
                 return "penalty_miss"
             if "goal" in play_type or "goal" in text or "scored" in play_type or "scored" in text:
                 return "penalty_goal"
-        if "goal" in play_type or "goal" in text:
-            return "goal"
         if "red card" in play_type or "red card" in text:
             return "red_card"
         if "yellow card" in play_type or "yellow card" in text or "booking" in play_type or "booking" in text:
             return "yellow_card"
+        if "goal" in play_type or "goal" in text:
+            return "goal"
         if "substitution" in play_type or "substitution" in text:
             return "substitution"
         return None
