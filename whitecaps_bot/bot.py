@@ -213,6 +213,9 @@ class WhitecapsBot(commands.Bot):
                     self.tracker.posted_event_keys.add(event.dedupe_key)
                     if event.event_type in ("goal", "penalty_goal", "own_goal"):
                         goal_from_events = True
+                        # Reset the periodic timer so it doesn't fire again shortly
+                        # after a real goal was just posted via key events.
+                        self.tracker.last_score_post_time = datetime.now(timezone.utc)
                     await destination.send(embed=self.tracker.build_key_event_embed(event, match))
             except RuntimeError:
                 logger.warning("Key events fetch failed for fixture %s", match.fixture_id)
@@ -230,7 +233,7 @@ class WhitecapsBot(commands.Bot):
             last_post = self.tracker.last_score_post_time
             if last_post is None or (now - last_post) >= timedelta(minutes=15):
                 self.tracker.last_score_post_time = now
-                await destination.send(embed=self.tracker.build_score_embed(match))
+                await destination.send(embed=self.tracker.build_live_score_embed(match))
 
         # Half-time alert
         if match.is_halftime and not self.tracker.halftime_posted:
