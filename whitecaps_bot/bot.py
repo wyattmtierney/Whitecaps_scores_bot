@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 
@@ -35,7 +36,13 @@ class WhitecapsBot(commands.Bot):
         self.target_channel_id: int | None = settings.channel_id
 
     async def setup_hook(self) -> None:
+        # /live and /stop control the match feed, so they are limited to server
+        # managers. default_permissions hides them from everyone else in the slash
+        # menu; has_permissions enforces it (also covers the ! prefix form).
         @self.hybrid_command(name="live", description="Start live Whitecaps match updates in this channel")
+        @commands.guild_only()
+        @commands.has_permissions(manage_guild=True)
+        @app_commands.default_permissions(manage_guild=True)
         async def cmd_live(ctx: commands.Context):
             self.target_channel_id = ctx.channel.id
             if self.update_task and not self.update_task.done():
@@ -46,6 +53,9 @@ class WhitecapsBot(commands.Bot):
             await ctx.send("Started live Whitecaps updates (scores, cards & substitutions).")
 
         @self.hybrid_command(name="stop", description="Stop live Whitecaps match updates")
+        @commands.guild_only()
+        @commands.has_permissions(manage_guild=True)
+        @app_commands.default_permissions(manage_guild=True)
         async def cmd_stop(ctx: commands.Context):
             if self.update_task and not self.update_task.done():
                 self.update_task.cancel()
@@ -102,6 +112,15 @@ class WhitecapsBot(commands.Bot):
 
         if self.settings.channel_id or self.settings.forum_channel_id:
             self.update_task = asyncio.create_task(self._live_update_loop())
+
+    async def on_command_error(self, ctx: commands.Context, error: commands.CommandError) -> None:
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.send("Only server managers can use this command.", ephemeral=True)
+            return
+        if isinstance(error, commands.NoPrivateMessage):
+            await ctx.send("This command only works in a server.", ephemeral=True)
+            return
+        await super().on_command_error(ctx, error)
 
     @staticmethod
     def _score_line(match: MatchState) -> str:
