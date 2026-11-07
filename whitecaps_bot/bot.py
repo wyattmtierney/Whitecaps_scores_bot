@@ -13,7 +13,7 @@ from whitecaps_bot.apifootball import MatchState, with_retry
 from whitecaps_bot.config import Settings
 from whitecaps_bot.logging_setup import configure_logging
 from whitecaps_bot.provider import ScoreProvider
-from whitecaps_bot.tracker import MatchTracker
+from whitecaps_bot.tracker import MatchTracker, compute_poll_delay
 
 
 logger = logging.getLogger("whitecaps_bot")
@@ -33,6 +33,7 @@ class WhitecapsBot(commands.Bot):
         )
         self.tracker = MatchTracker()
         self.update_task: asyncio.Task | None = None
+        self._last_fetched_match: MatchState | None = None
         self.target_channel_id: int | None = settings.channel_id
 
     async def setup_hook(self) -> None:
@@ -139,18 +140,32 @@ class WhitecapsBot(commands.Bot):
 
     async def _live_update_loop(self) -> None:
         await self.wait_until_ready()
+        base = self.settings.poll_interval_seconds
+        last_delay: float | None = None
         while not self.is_closed():
+            # On any failure, retry at the base interval.
+            delay = float(base)
             try:
                 await self._update_once()
+                delay = compute_poll_delay(
+                    self._last_fetched_match,
+                    base_seconds=base,
+                    fulltime_posted=self.tracker.fulltime_posted,
+                )
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("Live update loop failed; continuing")
 
-            await asyncio.sleep(self.settings.poll_interval_seconds)
+            # Log when switching between fast and slow polling, not every cycle.
+            if last_delay is None or (delay <= base) != (last_delay <= base):
+                logger.info("Polling every %ss", round(delay) if delay <= base else f"~{round(delay / 60)}m")
+            last_delay = delay
+            await asyncio.sleep(delay)
 
     async def _update_once(self) -> None:
         match = await with_retry(lambda: self.api.get_current_or_next_whitecaps_fixture(self.settings.whitecaps_team_id))
+        self._last_fetched_match = match
         if not match:
             return
 

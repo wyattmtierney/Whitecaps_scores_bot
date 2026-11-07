@@ -14,6 +14,54 @@ logger = logging.getLogger("whitecaps_bot.tracker")
 # Only create a thread if the match is within this window of kickoff.
 THREAD_CREATION_WINDOW = timedelta(hours=12)
 
+# Adaptive polling. Fast polling (POLL_INTERVAL_SECONDS, default 30s) is only
+# needed around and during a match; the rest of the time the bot just needs to
+# notice schedule changes and open the match thread on time.
+FAST_POLL_LEAD = timedelta(minutes=30)      # switch to fast polling this long before kickoff
+MATCH_DAY_POLL = timedelta(minutes=10)      # inside the thread window, before fast polling
+IDLE_POLL = timedelta(minutes=30)           # no match soon, or match finished and posted
+
+
+def compute_poll_delay(
+    match: MatchState | None,
+    *,
+    base_seconds: float,
+    fulltime_posted: bool,
+    now: datetime | None = None,
+) -> float:
+    """Seconds to wait before the next poll, based on where the match is.
+
+    - Live, or within 30 min of kickoff (or kickoff is overdue): base interval.
+    - Finished but full-time not yet posted: base interval.
+    - Inside the 12h thread window: every 10 min.
+    - Further out: every 30 min, but waking exactly when the thread window
+      opens so the match thread is still created on time.
+    Never returns less than the base interval.
+    """
+    now = now or datetime.now(timezone.utc)
+    base = timedelta(seconds=base_seconds)
+
+    if match is None:
+        delay = IDLE_POLL
+    elif match.state == "in":
+        delay = base
+    elif match.state == "post":
+        delay = IDLE_POLL if fulltime_posted else base
+    elif match.starts_at is None:
+        delay = MATCH_DAY_POLL
+    else:
+        until_kickoff = match.starts_at - now
+        if until_kickoff <= FAST_POLL_LEAD:
+            delay = base
+        else:
+            until_window = until_kickoff - THREAD_CREATION_WINDOW
+            regular = MATCH_DAY_POLL if until_window <= timedelta(0) else IDLE_POLL
+            delay = min(regular, until_kickoff - FAST_POLL_LEAD)
+            if until_window > timedelta(0):
+                delay = min(delay, until_window)
+
+    return max(delay, base).total_seconds()
+
 WHITECAPS_BLUE = 0x002F6C
 WHITECAPS_TEAL = 0x009CDE
 WIN_GREEN = 0x2ECC71
