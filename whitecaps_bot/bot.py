@@ -21,9 +21,11 @@ logger = logging.getLogger("whitecaps_bot")
 
 class WhitecapsBot(commands.Bot):
     def __init__(self, settings: Settings):
+        # No privileged Message Content intent: slash commands don't need it.
+        # Text commands still work by @mentioning the bot ("@Bot standings"),
+        # since Discord always delivers content for messages that mention it.
         intents = discord.Intents.default()
-        intents.message_content = True
-        super().__init__(command_prefix=settings.command_prefix, intents=intents, help_command=None)
+        super().__init__(command_prefix=commands.when_mentioned, intents=intents, help_command=None)
 
         self.settings = settings
         self.api = ScoreProvider(
@@ -111,7 +113,7 @@ class WhitecapsBot(commands.Bot):
 
         @self.hybrid_command(name="help", description="Show available bot commands")
         async def cmd_help(ctx: commands.Context):
-            await ctx.send(embed=self.tracker.build_help_embed(self.settings.command_prefix))
+            await ctx.send(embed=self.tracker.build_help_embed("/"))
 
         # Sync slash commands to Discord
         if self.settings.discord_guild_id:

@@ -59,7 +59,7 @@ def _bot_with_thread():
     settings = Settings(
         discord_token="x", discord_guild_id=None, channel_id=None, forum_channel_id=None,
         api_football_key=None, espn_team_id="9727", espn_team_name="Vancouver Whitecaps",
-        whitecaps_team_id=1603, poll_interval_seconds=30, command_prefix="!",
+        whitecaps_team_id=1603, poll_interval_seconds=30,
     )
     bot = WhitecapsBot(settings)
     bot.api = FakeApi()

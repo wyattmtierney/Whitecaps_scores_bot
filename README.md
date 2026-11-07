@@ -12,7 +12,7 @@ A Discord bot built for **Vancouver Whitecaps FC** fans. Get live match updates,
 | `/upcoming` | Show the next 5 upcoming Whitecaps matches |
 | `/standings` | Show the MLS league table |
 
-All commands work as both **slash commands** (`/live`) and **prefix commands** (`!live`).
+All commands are **slash commands** (`/standings`). They also work by mentioning the bot (`@Whitecaps Bot standings`). `/live` and `/stop` are limited to members with Manage Server.
 
 ### Live match notifications
 
@@ -60,7 +60,6 @@ Fill in your `.env`:
 | `API_FOOTBALL_KEY` | No | — | API-Football key (fallback provider) |
 | `WHITECAPS_TEAM_ID` | No | `1613` | API-Football team ID |
 | `POLL_INTERVAL_SECONDS` | No | `30` | How often to poll for live updates (seconds) |
-| `COMMAND_PREFIX` | No | `!` | Prefix for text commands |
 
 ### 3. Run
 

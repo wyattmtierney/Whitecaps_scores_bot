@@ -506,7 +506,7 @@ class MatchTracker:
         return embed
 
     @staticmethod
-    def build_help_embed(prefix: str = "!") -> discord.Embed:
+    def build_help_embed(prefix: str = "/") -> discord.Embed:
         """Build a help embed listing all available commands."""
         embed = discord.Embed(
             title="\U0001f1e8\U0001f1e6 Whitecaps Bot Commands",
