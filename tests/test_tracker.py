@@ -79,11 +79,21 @@ def test_should_create_thread_triggers_when_window_opens():
 
 
 def test_should_create_thread_allows_near_kickoff():
+    # Inside THREAD_CREATION_WINDOW (12h). This used 20h from when the window
+    # was 36h and was never updated.
     tracker = MatchTracker()
     match = _make_match(
-        starts_at=datetime.now(timezone.utc) + timedelta(hours=20),
+        starts_at=datetime.now(timezone.utc) + timedelta(hours=11),
     )
     assert tracker.should_create_thread(match) is True
+
+
+def test_should_create_thread_rejects_just_outside_window():
+    tracker = MatchTracker()
+    match = _make_match(
+        starts_at=datetime.now(timezone.utc) + timedelta(hours=13),
+    )
+    assert tracker.should_create_thread(match) is False
 
 
 def test_should_create_thread_allows_live():

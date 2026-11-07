@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "whitecaps-bot"
@@ -11,3 +11,6 @@ dependencies = [
     "aiohttp>=3.10.0",
     "python-dotenv>=1.0.1",
 ]
+
+[tool.setuptools]
+packages = ["whitecaps_bot"]

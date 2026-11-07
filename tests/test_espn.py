@@ -145,12 +145,8 @@ def test_ca_broadcast_replacements_covers_fs2_and_tudn():
     assert "FuboTV" in _CA_BROADCAST_REPLACEMENTS["FS2"]
 
 
-def test_extract_match_replaces_fs2_with_canadian(monkeypatch):
+def test_extract_match_replaces_fs2_with_canadian():
     """FS2 in ESPN broadcasts should appear as OneSoccer / FuboTV, not FS2."""
-    import asyncio
-    from datetime import datetime, timezone
-    from unittest.mock import AsyncMock
-
     client = EspnClient()
     payload = {
         "events": [
@@ -172,10 +168,10 @@ def test_extract_match_replaces_fs2_with_canadian(monkeypatch):
             }
         ]
     }
-    monkeypatch.setattr(client, "_get", AsyncMock(return_value=payload))
-    result = asyncio.get_event_loop().run_until_complete(client.get_upcoming_fixtures())
-    assert result
-    match = result[0]
+    # Call _extract_match directly: going through get_upcoming_fixtures made
+    # this test fail once the hardcoded match date passed.
+    match = client._extract_match(payload["events"][0])
+    assert match is not None
     # Neither FS2 nor TUDN should appear
     combined = " ".join(match.broadcasts)
     assert "FS2" not in combined
