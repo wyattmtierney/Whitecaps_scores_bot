@@ -64,7 +64,17 @@ class WhitecapsBot(commands.Bot):
 
         @self.hybrid_command(name="status", description="Show current Whitecaps match status")
         async def cmd_status(ctx: commands.Context):
-            match = await with_retry(lambda: self.api.get_current_or_next_whitecaps_fixture(self.settings.whitecaps_team_id))
+            # Fetching can take several requests plus retries; defer so Discord
+            # doesn't show "application did not respond" after 3 seconds.
+            await ctx.defer()
+            try:
+                match = await with_retry(
+                    lambda: self.api.get_current_or_next_whitecaps_fixture(self.settings.whitecaps_team_id)
+                )
+            except RuntimeError:
+                logger.exception("Failed to fetch match status")
+                await ctx.send("Could not fetch match status. Try again later.")
+                return
             if not match:
                 await ctx.send("No Whitecaps fixture available right now.")
                 return
