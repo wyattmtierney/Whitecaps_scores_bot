@@ -1,3 +1,37 @@
-discord.py>=2.4.0
-aiohttp>=3.10.0
-python-dotenv>=1.0.1
+# Pinned for Python 3.12 (see .python-version). Regenerate after changing
+# dependencies in pyproject.toml:
+#   uv pip compile pyproject.toml --python-version 3.12 --no-header -o requirements.txt
+aiohappyeyeballs==2.7.1
+    # via aiohttp
+aiohttp==3.14.5
+    # via
+    #   whitecaps-bot (pyproject.toml)
+    #   discord-py
+aiosignal==1.4.0
+    # via aiohttp
+attrs==26.1.0
+    # via aiohttp
+discord-py==2.7.1
+    # via whitecaps-bot (pyproject.toml)
+frozenlist==1.8.0
+    # via
+    #   aiohttp
+    #   aiosignal
+idna==3.20
+    # via yarl
+multidict==7.2.1
+    # via
+    #   aiohttp
+    #   yarl
+propcache==0.5.4
+    # via
+    #   aiohttp
+    #   yarl
+python-dotenv==1.2.4
+    # via whitecaps-bot (pyproject.toml)
+typing-extensions==4.16.0
+    # via
+    #   aiohttp
+    #   aiosignal
+yarl==1.25.1
+    # via aiohttp
