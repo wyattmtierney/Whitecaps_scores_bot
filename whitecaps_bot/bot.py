@@ -169,15 +169,24 @@ class WhitecapsBot(commands.Bot):
         if not match:
             return
 
-        fixture_changed = self.tracker.current_fixture_id != match.fixture_id
-
-        if fixture_changed:
+        if not self.tracker.is_same_match(match):
             logger.info(
                 "Fixture changed: %s → %s (%s vs %s, state=%s)",
                 self.tracker.current_fixture_id, match.fixture_id,
                 match.home_name, match.away_name, match.state,
             )
-            self.tracker.reset_for_new_fixture(match.fixture_id)
+            self.tracker.reset_for_new_fixture(match.fixture_id, match.starts_at)
+        else:
+            if match.fixture_id != self.tracker.current_fixture_id:
+                # Same match under the other data provider's ID; keep all state
+                # (thread, posted events, score) so nothing gets reposted.
+                logger.info(
+                    "Same match now reported as fixture %s (was %s); keeping match state",
+                    match.fixture_id, self.tracker.current_fixture_id,
+                )
+                self.tracker.current_fixture_id = match.fixture_id
+            if match.starts_at is not None:
+                self.tracker.current_starts_at = match.starts_at
 
         # Create a match thread when the kickoff window opens.
         # Skip the check entirely once a thread is already established for this fixture.

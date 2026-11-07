@@ -18,16 +18,22 @@ class ScoreProvider:
         self.espn = EspnClient(team_id=espn_team_id, team_name=espn_team_name)
         self.api_football = ApiFootballClient(api_football_key) if api_football_key else None
         self._last_espn_event_id: str | None = None
+        # True only when the latest fixture came from ESPN. Key events come
+        # from ESPN, so after a fallback tick the stored ESPN event ID may
+        # belong to a different match.
+        self._last_fixture_from_espn = False
 
     async def get_current_or_next_whitecaps_fixture(self, team_id: int) -> MatchState | None:
         try:
             match, event_id = await self.espn.get_current_or_next_whitecaps_fixture()
             if match:
                 self._last_espn_event_id = event_id
+                self._last_fixture_from_espn = True
                 return match
         except _NETWORK_ERRORS:
             logger.exception("ESPN fetch failed; trying API-Football fallback")
 
+        self._last_fixture_from_espn = False
         if self.api_football is None:
             return None
 
@@ -40,7 +46,9 @@ class ScoreProvider:
         return await self.espn.get_standings()
 
     async def get_key_events(self, fixture_id: int) -> list[KeyEvent]:
-        if self._last_espn_event_id:
+        # Skip while on the fallback; anything missed is picked up (and
+        # deduplicated by ESPN's IDs) once ESPN is back.
+        if self._last_espn_event_id and self._last_fixture_from_espn:
             try:
                 return await self.espn.get_key_events(self._last_espn_event_id, fixture_id)
             except _NETWORK_ERRORS:

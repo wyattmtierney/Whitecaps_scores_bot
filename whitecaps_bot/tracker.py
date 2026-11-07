@@ -14,6 +14,10 @@ logger = logging.getLogger("whitecaps_bot.tracker")
 # Only create a thread if the match is within this window of kickoff.
 THREAD_CREATION_WINDOW = timedelta(hours=12)
 
+# Two fixtures from different data providers are the same match if their
+# kickoff times are this close.
+SAME_MATCH_TOLERANCE = timedelta(hours=3)
+
 # Adaptive polling. Fast polling (POLL_INTERVAL_SECONDS, default 30s) is only
 # needed around and during a match; the rest of the time the bot just needs to
 # notice schedule changes and open the match thread on time.
@@ -121,6 +125,7 @@ def _is_whitecaps(name: str) -> bool:
 class MatchTracker:
     def __init__(self):
         self.current_fixture_id: int | None = None
+        self.current_starts_at: datetime | None = None
         self.match_thread_id: int | None = None
         self.last_score: tuple[int | None, int | None] | None = None
         self.last_state: str | None = None
@@ -527,9 +532,27 @@ class MatchTracker:
         embed.timestamp = datetime.now(timezone.utc)
         return embed
 
-    def reset_for_new_fixture(self, fixture_id: int) -> None:
+    def is_same_match(self, match: MatchState) -> bool:
+        """True if ``match`` is the match already being tracked.
+
+        ESPN and API-Football use different IDs for the same match, so an ID
+        change alone doesn't mean a new match: when the IDs differ, compare
+        kickoff times instead (the Whitecaps can't play twice within 3 hours).
+        Without this, an ESPN blip mid-match reset all state and every event
+        was reposted once ESPN came back.
+        """
+        if self.current_fixture_id is None:
+            return False
+        if match.fixture_id == self.current_fixture_id:
+            return True
+        if self.current_starts_at is None or match.starts_at is None:
+            return False
+        return abs(match.starts_at - self.current_starts_at) <= SAME_MATCH_TOLERANCE
+
+    def reset_for_new_fixture(self, fixture_id: int, starts_at: datetime | None = None) -> None:
         """Atomically reset all per-match tracking state for a new fixture."""
         self.current_fixture_id = fixture_id
+        self.current_starts_at = starts_at
         self.last_score = None
         self.last_state = None
         self.last_score_post_time = None
