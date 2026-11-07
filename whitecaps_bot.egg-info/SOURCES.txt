@@ -3,8 +3,10 @@ pyproject.toml
 tests/test_apifootball.py
 tests/test_config.py
 tests/test_espn.py
+tests/test_fallback_dedupe.py
 tests/test_logging_setup.py
 tests/test_match_state.py
+tests/test_poll_delay.py
 tests/test_tracker.py
 whitecaps_bot/__init__.py
 whitecaps_bot/apifootball.py

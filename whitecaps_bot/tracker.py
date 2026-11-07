@@ -66,6 +66,7 @@ def compute_poll_delay(
 
     return max(delay, base).total_seconds()
 
+
 WHITECAPS_BLUE = 0x002F6C
 WHITECAPS_TEAL = 0x009CDE
 WIN_GREEN = 0x2ECC71
