@@ -503,7 +503,7 @@ class MatchTracker:
             time_to_kickoff = match.starts_at - datetime.now(timezone.utc)
             if time_to_kickoff <= THREAD_CREATION_WINDOW:
                 return True
-            logger.info(
+            logger.debug(
                 "Match %s is %s away; outside thread creation window.",
                 match.fixture_id, time_to_kickoff,
             )

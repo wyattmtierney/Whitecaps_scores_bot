@@ -11,11 +11,11 @@ from dotenv import load_dotenv
 
 from whitecaps_bot.apifootball import MatchState, with_retry
 from whitecaps_bot.config import Settings
+from whitecaps_bot.logging_setup import configure_logging
 from whitecaps_bot.provider import ScoreProvider
 from whitecaps_bot.tracker import MatchTracker
 
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
 logger = logging.getLogger("whitecaps_bot")
 
 
@@ -267,9 +267,12 @@ class WhitecapsBot(commands.Bot):
 
 def main() -> None:
     load_dotenv()
+    configure_logging()
     settings = Settings.from_env()
     bot = WhitecapsBot(settings)
-    bot.run(settings.discord_token)
+    # log_handler=None stops discord.py adding its own stderr handler on top of
+    # ours, which is what made every gateway line print twice.
+    bot.run(settings.discord_token, log_handler=None)
 
 
 if __name__ == "__main__":
