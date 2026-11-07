@@ -655,3 +655,10 @@ class MatchTracker:
             self.match_thread_id = fallback_channel.id
             self._threads_created_for.add(match.fixture_id)
             return fallback_channel
+
+        # Previously fell through and returned None, which crashed on the
+        # caller's .send() with a confusing AttributeError.
+        raise RuntimeError(
+            f"Fallback channel {fallback_channel_id} is a {type(fallback_channel).__name__}, "
+            "not a text channel. Set CHANNEL_ID to a text channel."
+        )

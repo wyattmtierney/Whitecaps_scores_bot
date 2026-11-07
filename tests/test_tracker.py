@@ -332,3 +332,20 @@ def test_reset_for_new_fixture_clears_all_state():
     assert tracker.match_thread_id is None
     # _threads_created_for must survive reset (prevents duplicate thread creation)
     assert 99 not in tracker._threads_created_for
+
+
+def test_ensure_match_thread_rejects_non_text_fallback_channel():
+    import asyncio
+
+    import pytest
+
+    class FakeVoiceChannel:
+        pass
+
+    class FakeBot:
+        def get_channel(self, channel_id):
+            return FakeVoiceChannel()
+
+    tracker = MatchTracker()
+    with pytest.raises(RuntimeError, match="not a text channel"):
+        asyncio.run(tracker.ensure_match_thread(FakeBot(), _make_match(), None, 123))
