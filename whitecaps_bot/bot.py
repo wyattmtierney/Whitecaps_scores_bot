@@ -178,6 +178,19 @@ class WhitecapsBot(commands.Bot):
                 match.home_name, match.away_name, match.state,
             )
             self.tracker.reset_for_new_fixture(match.fixture_id, match.starts_at)
+            if match.state == "post":
+                # First sighting of this match is after it ended, which means the
+                # bot just (re)started after full time. State lives in memory, so
+                # without this a deploy after a match re-posted "Match thread is
+                # live" and the full-time result into the old thread.
+                logger.info(
+                    "Fixture %s already finished when first seen; not re-posting it",
+                    match.fixture_id,
+                )
+                self.tracker.fulltime_posted = True
+                self.tracker.last_state = match.state
+                self.tracker._threads_created_for.add(match.fixture_id)
+                return
         else:
             if match.fixture_id != self.tracker.current_fixture_id:
                 # Same match under the other data provider's ID; keep all state

@@ -134,3 +134,50 @@ def test_key_events_skipped_while_on_fallback():
     on_espn, on_fallback = asyncio.run(scenario())
     assert on_espn == [GOAL]
     assert on_fallback == []
+
+
+def _finished(fixture_id=ESPN_ID):
+    from dataclasses import replace
+    return replace(_live(fixture_id, goals=(1, 2)), short_status="FT", elapsed=90)
+
+
+def test_restart_after_full_time_posts_nothing():
+    """A deploy after a match must not re-post into the old thread."""
+    async def scenario():
+        from whitecaps_bot.bot import WhitecapsBot
+        from whitecaps_bot.tracker import compute_poll_delay
+
+        bot, thread = _bot_with_thread()
+        # Simulate a fresh process: nothing tracked yet.
+        bot.tracker = type(bot.tracker)()
+        bot.api.match = _finished()
+        assert bot.api.match.state == "post"
+
+        await bot._update_once()
+        await bot._update_once()  # and on later ticks
+
+        delay = compute_poll_delay(bot.api.match, base_seconds=30,
+                                   fulltime_posted=bot.tracker.fulltime_posted)
+        await bot.close()
+        return thread.sent, bot.tracker, delay
+
+    sent, tracker, delay = asyncio.run(scenario())
+    assert sent == []
+    assert tracker.match_thread_id is None
+    assert tracker.fulltime_posted is True
+    assert delay == 30 * 60  # goes back to slow polling
+
+
+def test_full_time_still_posted_when_match_ends_while_running():
+    async def scenario():
+        bot, thread = _bot_with_thread()
+        bot.api.match, bot.api.events = _live(ESPN_ID), []
+        await bot._update_once()
+        sent_live = len(thread.sent)
+        bot.api.match = _finished()
+        await bot._update_once()
+        await bot.close()
+        return sent_live, len(thread.sent)
+
+    sent_live, sent_total = asyncio.run(scenario())
+    assert sent_total == sent_live + 1  # exactly one full-time post
