@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -9,7 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from whitecaps_bot.apifootball import MatchState, with_retry
+from whitecaps_bot.apifootball import KeyEvent, MatchState, with_retry
 from whitecaps_bot.config import Settings
 from whitecaps_bot.logging_setup import configure_logging
 from whitecaps_bot.provider import ScoreProvider
@@ -36,6 +37,8 @@ class WhitecapsBot(commands.Bot):
         self.tracker = MatchTracker()
         self.update_task: asyncio.Task | None = None
         self._last_fetched_match: MatchState | None = None
+        self._last_known_match: MatchState | None = None
+        self._score_change_seen_at: datetime | None = None
         self.target_channel_id: int | None = settings.channel_id
 
     async def setup_hook(self) -> None:
@@ -143,15 +146,21 @@ class WhitecapsBot(commands.Bot):
     async def _live_update_loop(self) -> None:
         await self.wait_until_ready()
         base = self.settings.poll_interval_seconds
-        last_delay: float | None = None
+        live = self.settings.live_poll_interval_seconds
+        last_label: str | None = None
         while not self.is_closed():
-            # On any failure, retry at the base interval.
-            delay = float(base)
+            started = time.monotonic()
+            # On any failure, retry at the live interval if a match is on,
+            # otherwise the base interval.
+            delay = float(live if self._match_is_active() else base)
             try:
                 await self._update_once()
                 delay = compute_poll_delay(
-                    self._last_fetched_match,
+                    # A blank result mid-match (feed glitch) must not drop the
+                    # bot into 30-minute idle polling; use the last known match.
+                    self._last_fetched_match or self._last_known_match,
                     base_seconds=base,
+                    live_seconds=live,
                     fulltime_posted=self.tracker.fulltime_posted,
                 )
             except asyncio.CancelledError:
@@ -159,17 +168,46 @@ class WhitecapsBot(commands.Bot):
             except Exception:
                 logger.exception("Live update loop failed; continuing")
 
-            # Log when switching between fast and slow polling, not every cycle.
-            if last_delay is None or (delay <= base) != (last_delay <= base):
-                logger.info("Polling every %ss", round(delay) if delay <= base else f"~{round(delay / 60)}m")
-            last_delay = delay
-            await asyncio.sleep(delay)
+            took = time.monotonic() - started
+            if self._match_is_active() and took > 3:
+                logger.warning("Slow live poll: %.1fs", took)
+
+            # Log when the polling interval changes, not every cycle.
+            label = f"{round(delay)}s" if delay < 60 else f"~{round(delay / 60)} min"
+            if label != last_label:
+                logger.info("Polling every %s", label)
+            last_label = label
+            await asyncio.sleep(max(0.0, delay - took) if self._match_is_active() else delay)
+
+    def _log_goal_timing(self, how: str, event: KeyEvent | None = None) -> None:
+        """Log how long a goal took to reach Discord, to measure feed vs bot delay.
+
+        Compare these timestamps with when fans posted about the goal in the
+        match thread to get the end-to-end delay.
+        """
+        now = datetime.now(timezone.utc)
+        parts = [f"Goal posted ({how}) at {now:%H:%M:%S}Z"]
+        if event is not None:
+            parts.append(f"{event.player_name or 'unknown'} {event.elapsed}'")
+            if event.wallclock is not None:
+                parts.append(
+                    f"ESPN goal time {event.wallclock:%H:%M:%S}Z "
+                    f"({(now - event.wallclock).total_seconds():.0f}s before post)"
+                )
+        if self._score_change_seen_at is not None:
+            parts.append(f"score change first seen {(now - self._score_change_seen_at).total_seconds():.0f}s before post")
+        logger.info(" | ".join(parts))
+
+    def _match_is_active(self) -> bool:
+        match = self._last_known_match
+        return match is not None and match.state == "in"
 
     async def _update_once(self) -> None:
         match = await with_retry(lambda: self.api.get_current_or_next_whitecaps_fixture(self.settings.whitecaps_team_id))
         self._last_fetched_match = match
         if not match:
             return
+        self._last_known_match = match
 
         if not self.tracker.is_same_match(match):
             logger.info(
@@ -262,6 +300,13 @@ class WhitecapsBot(commands.Bot):
         if score_changed:
             self.tracker.last_score = score
 
+        if score_increased:
+            self._score_change_seen_at = datetime.now(timezone.utc)
+            logger.info(
+                "Score change seen: %s %s-%s %s (%s')",
+                match.home_name, score[0], score[1], match.away_name, match.elapsed,
+            )
+
         if is_kickoff:
             self.tracker.last_score_post_time = datetime.now(timezone.utc)
             await destination.send(embed=self.tracker.build_kickoff_embed(match))
@@ -279,12 +324,15 @@ class WhitecapsBot(commands.Bot):
                             goal_from_events = True
                         continue
                     self.tracker.posted_event_keys.add(event.dedupe_key)
-                    if event.event_type in ("goal", "penalty_goal", "own_goal"):
+                    is_goal = event.event_type in ("goal", "penalty_goal", "own_goal")
+                    if is_goal:
                         goal_from_events = True
                         # Reset the periodic timer so it doesn't fire again shortly
                         # after a real goal was just posted via key events.
                         self.tracker.last_score_post_time = datetime.now(timezone.utc)
                     await destination.send(embed=self.tracker.build_key_event_embed(event, match))
+                    if is_goal:
+                        self._log_goal_timing("key event", event)
             except RuntimeError:
                 logger.warning("Key events fetch failed for fixture %s", match.fixture_id)
 
@@ -293,6 +341,7 @@ class WhitecapsBot(commands.Bot):
         if score_increased and not goal_from_events:
             self.tracker.last_score_post_time = datetime.now(timezone.utc)
             await destination.send(embed=self.tracker.build_score_embed(match))
+            self._log_goal_timing("score change, scorer not in feed yet")
 
         # Periodic score update every 15 minutes during live play so users
         # see the bot is alive even in a scoreless match.

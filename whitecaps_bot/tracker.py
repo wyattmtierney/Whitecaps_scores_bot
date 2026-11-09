@@ -22,6 +22,7 @@ SAME_MATCH_TOLERANCE = timedelta(hours=3)
 # needed around and during a match; the rest of the time the bot just needs to
 # notice schedule changes and open the match thread on time.
 FAST_POLL_LEAD = timedelta(minutes=30)      # switch to fast polling this long before kickoff
+LIVE_POLL_LEAD = timedelta(minutes=5)       # switch to live (10s) polling this long before kickoff
 MATCH_DAY_POLL = timedelta(minutes=10)      # inside the thread window, before fast polling
 IDLE_POLL = timedelta(minutes=30)           # no match soon, or match finished and posted
 
@@ -31,32 +32,38 @@ def compute_poll_delay(
     *,
     base_seconds: float,
     fulltime_posted: bool,
+    live_seconds: float | None = None,
     now: datetime | None = None,
 ) -> float:
     """Seconds to wait before the next poll, based on where the match is.
 
-    - Live, or within 30 min of kickoff (or kickoff is overdue): base interval.
-    - Finished but full-time not yet posted: base interval.
+    - Live, within 5 min of kickoff, overdue kickoff, or finished but full
+      time not yet posted: live interval (default 10s via settings).
+    - 5-30 min before kickoff: base interval (30s).
     - Inside the 12h thread window: every 10 min.
     - Further out: every 30 min, but waking exactly when the thread window
       opens so the match thread is still created on time.
-    Never returns less than the base interval.
+    Never returns less than the live interval.
     """
     now = now or datetime.now(timezone.utc)
     base = timedelta(seconds=base_seconds)
+    live = timedelta(seconds=live_seconds) if live_seconds is not None else base
+    live = min(live, base)
 
     if match is None:
         delay = IDLE_POLL
     elif match.state == "in":
-        delay = base
+        delay = live
     elif match.state == "post":
-        delay = IDLE_POLL if fulltime_posted else base
+        delay = IDLE_POLL if fulltime_posted else live
     elif match.starts_at is None:
         delay = MATCH_DAY_POLL
     else:
         until_kickoff = match.starts_at - now
-        if until_kickoff <= FAST_POLL_LEAD:
-            delay = base
+        if until_kickoff <= LIVE_POLL_LEAD:
+            delay = live
+        elif until_kickoff <= FAST_POLL_LEAD:
+            delay = min(base, until_kickoff - LIVE_POLL_LEAD)
         else:
             until_window = until_kickoff - THREAD_CREATION_WINDOW
             regular = MATCH_DAY_POLL if until_window <= timedelta(0) else IDLE_POLL
@@ -64,7 +71,7 @@ def compute_poll_delay(
             if until_window > timedelta(0):
                 delay = min(delay, until_window)
 
-    return max(delay, base).total_seconds()
+    return max(delay, live).total_seconds()
 
 
 WHITECAPS_BLUE = 0x002F6C

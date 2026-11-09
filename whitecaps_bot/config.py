@@ -23,6 +23,7 @@ class Settings:
     espn_team_name: str
     whitecaps_team_id: int
     poll_interval_seconds: int
+    live_poll_interval_seconds: int = 10
 
     @staticmethod
     def from_env() -> "Settings":
@@ -46,4 +47,5 @@ class Settings:
             espn_team_name=os.getenv("ESPN_TEAM_NAME", "Vancouver Whitecaps"),
             whitecaps_team_id=int(os.getenv("WHITECAPS_TEAM_ID", "1613")),
             poll_interval_seconds=int(os.getenv("POLL_INTERVAL_SECONDS", "30")),
+            live_poll_interval_seconds=int(os.getenv("LIVE_POLL_INTERVAL_SECONDS", "10")),
         )

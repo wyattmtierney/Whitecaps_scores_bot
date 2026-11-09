@@ -127,6 +127,7 @@ def test_key_events_skipped_while_on_fallback():
         on_espn = await provider.get_key_events(ESPN_ID)
 
         provider.espn.get_current_or_next_whitecaps_fixture = AsyncMock(side_effect=asyncio.TimeoutError)
+        provider.espn.get_summary = AsyncMock(side_effect=asyncio.TimeoutError)  # live mode tries this first
         await provider.get_current_or_next_whitecaps_fixture(1603)
         on_fallback = await provider.get_key_events(API_FOOTBALL_ID)
         return on_espn, on_fallback

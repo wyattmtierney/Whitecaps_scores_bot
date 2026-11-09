@@ -87,6 +87,16 @@ def _sub_players(play: dict) -> tuple[str, str]:
     return player_in or "Unknown", player_out or "Unknown"
 
 
+def _parse_wallclock(raw: Any) -> datetime | None:
+    """Parse ESPN's ISO ``wallclock`` (real-world time of a play), if present."""
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
 def _clock_elapsed(clock: dict) -> int | None:
     """Convert an ESPN clock dict to an integer match minute.
 
@@ -119,10 +129,15 @@ class EspnClient:
         self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         self._session: aiohttp.ClientSession | None = None
 
-    async def _get(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
+    async def _get(self, url: str, params: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(timeout=self._timeout)
-        async with self._session.get(url, params=params) as response:
+        # A per-request timeout lets live-match polling fail fast instead of
+        # waiting the default 15s on a slow ESPN response.
+        kwargs: dict[str, Any] = {"params": params}
+        if timeout is not None:
+            kwargs["timeout"] = aiohttp.ClientTimeout(total=timeout)
+        async with self._session.get(url, **kwargs) as response:
             response.raise_for_status()
             return await response.json()
 
@@ -236,14 +251,18 @@ class EspnClient:
             away_logo=away_logo,
         )
 
-    async def get_current_or_next_whitecaps_fixture(self) -> tuple[MatchState | None, str | None]:
+    async def get_current_or_next_whitecaps_fixture(
+        self, timeout: float | None = None
+    ) -> tuple[MatchState | None, str | None]:
         now = datetime.now(timezone.utc).date()
         candidates: list[EspnFixtureRef] = []
 
         # Public-ESPN-API docs show team-filtered scoreboard usage.
         for offset in (-1, 0, 1, 2, 3):
             day = now + timedelta(days=offset)
-            payload = await self._get(ESPN_SCOREBOARD_URL, {"dates": day.strftime("%Y%m%d"), "team": self.team_id})
+            payload = await self._get(
+                ESPN_SCOREBOARD_URL, {"dates": day.strftime("%Y%m%d"), "team": self.team_id}, timeout=timeout
+            )
             for event in payload.get("events", []):
                 match = self._extract_match(event)
                 if match is not None:
@@ -327,9 +346,51 @@ class EspnClient:
 
         return entries
 
-    async def get_key_events(self, event_id: str, fixture_id: int) -> list[KeyEvent]:
+    async def get_summary(self, event_id: str, timeout: float | None = None) -> dict[str, Any]:
+        """Fetch the match summary: score, status and key events in one call."""
+        return await self._get(ESPN_SUMMARY_URL, {"event": event_id}, timeout=timeout)
+
+    @staticmethod
+    def live_update_from_summary(payload: dict[str, Any], event_id: str) -> dict[str, Any] | None:
+        """Read the live score and status from a summary's ``header``.
+
+        Returns MatchState field updates, or None if the payload isn't the
+        expected match or is missing what we need (caller then falls back to
+        the scoreboard).
+        """
+        header = payload.get("header") or {}
+        if str(header.get("id") or "") != str(event_id):
+            return None
+        comp = (header.get("competitions") or [{}])[0]
+        competitors = comp.get("competitors") or []
+        home = next((c for c in competitors if c.get("homeAway") == "home"), None)
+        away = next((c for c in competitors if c.get("homeAway") == "away"), None)
+        status_type = ((comp.get("status") or {}).get("type")) or {}
+        state = status_type.get("state")
+        if home is None or away is None or state not in ("pre", "in", "post"):
+            return None
+        try:
+            home_goals = int(home.get("score") or 0)
+            away_goals = int(away.get("score") or 0)
+        except (TypeError, ValueError):
+            return None
+
+        detail = status_type.get("shortDetail") or status_type.get("detail") or ""
+        m = re.search(r"(\d+)", detail)
+        return {
+            "home_goals": home_goals,
+            "away_goals": away_goals,
+            "elapsed": int(m.group(1)) if m else None,
+            "short_status": state.upper(),
+            "long_status": status_type.get("detail") or status_type.get("description") or "",
+        }
+
+    async def get_key_events(self, event_id: str, fixture_id: int, timeout: float | None = None) -> list[KeyEvent]:
         """Fetch all key events from the ESPN summary in a single API call."""
-        payload = await self._get(ESPN_SUMMARY_URL, {"event": event_id})
+        payload = await self.get_summary(event_id, timeout=timeout)
+        return self.parse_key_events(payload, fixture_id)
+
+    def parse_key_events(self, payload: dict[str, Any], fixture_id: int) -> list[KeyEvent]:
         # Prefer the curated keyEvents list; fall back to all plays.
         plays = payload.get("keyEvents") or payload.get("plays") or []
         events: list[KeyEvent] = []
@@ -362,6 +423,7 @@ class EspnClient:
                 text=text,
                 player_name=player_name,
                 detail=detail,
+                wallclock=_parse_wallclock(play.get("wallclock")),
             ))
 
         return events

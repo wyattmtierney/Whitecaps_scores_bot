@@ -85,6 +85,9 @@ class KeyEvent:
     text: str
     player_name: str
     detail: str  # assist for goals, player_out for subs, reason for VAR, etc.
+    # Real-world time ESPN recorded the event, when provided. Used only to
+    # measure how far behind the bot's posts are; not part of dedupe.
+    wallclock: datetime | None = None
 
     @property
     def dedupe_key(self) -> str:
